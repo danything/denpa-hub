@@ -7,7 +7,7 @@
     {
       "description": "dotnet/sdk の動く major タグ (`11.0`) は正式リリースより前からあり、11月の GA まではプレビューを指す。プレビューでもビルドできてしまうので CI は緑のまま通る。正式リリースが出たら上限を上げて、TargetFramework も一緒に上げる (denpa と同じ)",
       "matchDatasources": ["docker"],
-      "matchPackageNames": ["mcr.microsoft.com/dotnet/sdk", "mcr.microsoft.com/dotnet/runtime-deps"],
+      "matchPackageNames": ["mcr.microsoft.com/dotnet/sdk"],
       "allowedVersions": "<11"
     }
   ]
