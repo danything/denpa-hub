@@ -1,0 +1,6 @@
+{
+  "//": "dotnet test を Microsoft.Testing.Platform (MTP) の方式で動かす。.NET 10 SDK は旧来の VSTest 経路で TUnit のテストを回せない",
+  "test": {
+    "runner": "Microsoft.Testing.Platform"
+  }
+}
