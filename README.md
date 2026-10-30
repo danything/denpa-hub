@@ -46,6 +46,25 @@ docker run --rm -p 8080:8080 \
 イメージは Native AOT の実行ファイル 1 個を distroless (`gcr.io/distroless/cc-debian13:nonroot`) に置いたもので、シェルもパッケージ管理も無く、root でも動きません。
 `GET /healthz` が `ok` を返します (生存確認用)。
 
+### Doa のクラスタ (`https://dh.doany.io`)
+
+`deploy/` が Doa のクラスタに置くマニフェストです。danything/gitops の bootstrap の ApplicationSet が `deploy/argocd.yaml` を見つけて、
+main の `deploy/*.yaml` をそのまま同期します (Helm は使わない)。
+
+| ファイル              | 中身                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------- |
+| `argocd.yaml`         | ApplicationSet が読む、この置き場の設定 (namespace `denpa-hub`)                                   |
+| `namespace.yaml`      | PSA を restricted にするラベル                                                                    |
+| `deployment.yaml`     | Deployment と Service。`PUBLIC_ORIGIN`・`TRUSTED_PROXIES` とイメージ (タグと digest) はここ        |
+| `secret.yaml`         | InfisicalSecret。Infisical の `doa` / `prod` / `/denpa-hub/denpa-hub` から Secret `denpa-hub` を作る |
+| `httproute.yaml`      | Gateway `kube-system/doany` の `https` のリスナーに `dh.doany.io` を載せる (Cloudflare を通す)    |
+| `network-policy.yaml` | 届く相手を Gateway とノードに絞る CiliumNetworkPolicy                                             |
+
+Infisical の `/denpa-hub/denpa-hub` には、[docs/niconico.md](docs/niconico.md#設定) の `NICONICO_*` を同じ名前で入れます
+(シークレットに加えて、リポジトリに書かないニコニコ固有のエンドポイントとスコープも)。
+新しいバージョンを出すときは `v*` のタグを push し、CI が出したイメージのタグと digest を `deployment.yaml` に書きます。
+ghcr.io のパッケージは公開なので、引くための資格情報は要りません。
+
 ## 開発
 
 .NET 10 の SDK で組みます。手元に SDK を入れない場合は、コンテナで動かします。

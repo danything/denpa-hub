@@ -1,0 +1,13 @@
+# この置き場の設定。danything/gitops の bootstrap/argocd/repos.yaml の ApplicationSet が、
+# org の中で deploy/argocd.yaml を持つリポジトリを探し、これを引数に Application を作る
+# (private のリポジトリも、clone と同じ GitHub App で読める)。
+name: denpa-hub
+namespace: denpa-hub
+
+# マニフェストの置き場 (リポジトリの根からの相対)
+sourcePath: deploy
+recurse: false
+
+autoSync: true
+prune: true
+selfHeal: true
