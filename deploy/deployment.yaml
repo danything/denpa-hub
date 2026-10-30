@@ -1,0 +1,94 @@
+# denpa-hub 本体。状態を持たないので Deployment 1 つ (台数を増やしても同じ Secret で動く)。
+#
+# 設定のうちリポジトリに書いてよいものはここに、書かないもの (シークレットとニコニコ固有の値) は
+# Infisical から作る Secret denpa-hub (secret.yaml) にあり、envFrom で全部読む。
+# Infisical の値を書き換えると、auto-reload の注釈で Pod が入れ替わる。
+#
+# イメージは v* のタグを push すると CI が ghcr.io に出す。入れ替えるときはタグと digest を両方書き換える。
+# ghcr.io のパッケージは公開 (danything の既定) なので imagePullSecrets は要らない
+apiVersion: v1
+kind: Service
+metadata:
+  name: denpa-hub
+  namespace: denpa-hub
+spec:
+  selector:
+    app: denpa-hub
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: denpa-hub
+  namespace: denpa-hub
+  annotations:
+    secrets.infisical.com/auto-reload: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: denpa-hub
+  template:
+    metadata:
+      labels:
+        app: denpa-hub
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # distroless の nonroot
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: denpa-hub
+          image: ghcr.io/danything/denpa-hub:v0.1.0@sha256:6e8959ae588aefdba6f947e4656837e021253858583325e5172a3d8156ad19d2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PUBLIC_ORIGIN
+              value: https://dh.doany.io
+            # X-Forwarded-For を信じる範囲 (レート制限を利用者のアドレスごとに数えるため)。
+            # 手前は Cloudflare → Gateway (Cilium の Envoy) の 2 段なので、両方を書く。
+            # - Pod の網: Gateway は hostNetwork で cilium_host (10.42.x) から繋いでくる。値は denpa の
+            #   trustedProxies・oauth2-proxy の --trusted-proxy-ip とそろえてある。網全体を信じるかわりに、
+            #   届く相手を network-policy.yaml で Gateway とノードに絞る
+            # - Cloudflare の範囲: https://www.cloudflare.com/ips/ (2026-10-30 に確かめた)。
+            #   NetBird につないだ端末は Cloudflare を通らずに Gateway へ来るが、そのときは Gateway が書いた接続元がそのまま使われる
+            - name: TRUSTED_PROXIES
+              value: >-
+                10.42.0.0/16,fd42::/64,
+                173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,
+                108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,
+                162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,
+                2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,
+                2a06:98c0::/29,2c0f:f248::/32
+          envFrom:
+            - secretRef:
+                name: denpa-hub
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 5m
+              memory: 32Mi
+            limits:
+              memory: 128Mi

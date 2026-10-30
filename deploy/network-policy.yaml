@@ -1,0 +1,23 @@
+# **denpa-hub に届いてよいのは Gateway とノードだけ。** TRUSTED_PROXIES は Pod の網全体 (10.42.0.0/16) を信じている
+# (Gateway の Envoy の送信元は cilium_host のアドレスで、ノードや起動ごとに変わりうるため、アドレスでは絞れない)。
+# そのままだと、クラスタの中のどの Pod も X-Forwarded-For を偽ってレート制限の単位を変えられるので、
+# 「届く相手」の側を Gateway (ingress) とノード (host・remote-node。kubelet の生存確認) に絞る。
+# 出ていく方 (ニコニコのトークンのエンドポイント・DNS) は絞らない
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: denpa-hub
+  namespace: denpa-hub
+spec:
+  endpointSelector:
+    matchLabels:
+      app: denpa-hub
+  ingress:
+    - fromEntities:
+        - ingress
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

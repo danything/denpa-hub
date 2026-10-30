@@ -1,0 +1,10 @@
+# **PSA は restricted で足りる。** 非 root (distroless の nonroot)・読み取り専用のルート FS・hostPath も特権も無い。
+# namespace 自体は ArgoCD の CreateNamespace が先に作り、ラベルはこのマニフェストが付ける。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: denpa-hub
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
