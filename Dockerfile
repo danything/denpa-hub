@@ -4,7 +4,7 @@
 # **arch ごとに、その arch のランナーで組む** (AOT のクロスはリンカの揃え直しが要るので、
 # 組む段を `--platform=$BUILDPLATFORM` にはしない)。土台は digest で留める。
 # ---------------------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0@sha256:3a9175b6c54b2f076817af1360f691c9994447b192faa48a1a1f112a516844c7 AS build
 ARG TARGETARCH
 WORKDIR /build
 # AOT のリンクに clang と zlib が要る
