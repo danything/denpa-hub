@@ -3,6 +3,7 @@ using System.Text.Json;
 using DenpaHub;
 using DenpaHub.Features.Niconico;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.AspNetCore.WebUtilities;
 
 namespace DenpaHub.Tests;
@@ -289,5 +290,28 @@ public class TokenTests
             last = response.StatusCode;
         }
         await Assert.That(last).IsEqualTo(HttpStatusCode.TooManyRequests);
+    }
+
+    [Test]
+    public async Task Cloudflare_と_Gateway_の後ろでは利用者のアドレスごとに数える()
+    {
+        // Cloudflare の範囲とクラスタの Pod の網を信じる (deploy/deployment.yaml と同じ形)
+        await using var h = await Harness.StartAsync(new() { ["TRUSTED_PROXIES"] = "173.245.48.0/20,10.42.0.0/16" });
+        var server = h.App.GetTestServer();
+        Task<HttpContext> Send(string forwardedFor) => server.SendAsync(context =>
+        {
+            context.Request.Method = "GET";
+            context.Request.Path = "/niconico/authorize";
+            context.Connection.RemoteIpAddress = IPAddress.Parse("10.42.0.148");
+            context.Request.Headers["X-Forwarded-For"] = forwardedFor;
+        });
+
+        // 同じ Cloudflare の端を通る 2 人。1 人目が上限に当たっても、2 人目は通る
+        var last = 0;
+        for (var i = 0; i < 31; i++) last = (await Send("203.0.113.5, 173.245.48.1")).Response.StatusCode;
+        await Assert.That(last).IsEqualTo(429);
+        await Assert.That((await Send("203.0.113.6, 173.245.48.1")).Response.StatusCode).IsEqualTo(400);
+        // 範囲外のアドレスより左は偽れるので読まない (上限に当たった 203.0.113.5 を名乗っても、数えるのは 198.51.100.7)
+        await Assert.That((await Send("203.0.113.5, 198.51.100.7")).Response.StatusCode).IsEqualTo(400);
     }
 }

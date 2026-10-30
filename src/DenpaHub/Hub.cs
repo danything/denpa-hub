@@ -42,6 +42,8 @@ public static class Hub
             builder.Services.Configure<ForwardedHeadersOptions>(o =>
             {
                 o.ForwardedHeaders = ForwardedHeaders.XForwardedFor;
+                // 手前が何段でも (Cloudflare → Gateway など)、右から信じる範囲のアドレスを外していき、最初の範囲外を利用者とする
+                o.ForwardLimit = null;
                 o.KnownProxies.Clear();
                 o.KnownIPNetworks.Clear();
                 foreach (var network in hub.TrustedProxies) o.KnownIPNetworks.Add(network);
