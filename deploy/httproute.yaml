@@ -1,4 +1,4 @@
-# 公開の経路。証明書は Gateway (danything/gitops の apps/gateway/) の `*.doany.io` のワイルドカードなので指定しない。
+# 公開の経路。証明書は Gateway (danything/gitops の deploy/gateway/) の `*.doany.io` のワイルドカードなので指定しない。
 # dh.doany.io は 1 段の名前なので `https` のリスナーに載る。http から https へのリダイレクトも Gateway 側にある。
 # **Cloudflare を通す** (gitops の基本。注釈を付けなければ ExternalDNS が proxied のレコードを作る)。
 # 映像のような大きな応答も、接続元の IP での判定も無いので、通さない理由が無い。
