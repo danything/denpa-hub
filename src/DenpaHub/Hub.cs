@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace DenpaHub;
 
 /// <summary>
-/// サーバの組み立て。機能をまたぐもの (ログの絞り・応答のヘッダ・プロキシ・レート制限の断り方・/healthz) だけをここに置き、
+/// サーバの組み立て。機能をまたぐもの (ログの出力レベル・応答のヘッダ・プロキシ・レート制限の断り方・/healthz) だけをここに置き、
 /// 各機能は Features/&lt;名前&gt;/ の Add と Map で足す
 /// </summary>
 public static class Hub
@@ -54,7 +54,7 @@ public static class Hub
 
         var app = builder.Build();
         if (hub.TrustedProxies.Count > 0) app.UseForwardedHeaders();
-        // 画面は持たない。返すのは JSON・短い文・リダイレクトだけなので、どれにも同じ締めたヘッダを付ける
+        // 画面は持たない。返すのは JSON・短い文・リダイレクトだけなので、どれにも同じ制限のヘッダを付ける
         app.Use((context, next) =>
         {
             var headers = context.Response.Headers;

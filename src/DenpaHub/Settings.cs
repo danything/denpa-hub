@@ -34,7 +34,7 @@ public sealed class Env(Func<string, string?> source)
     public Uri RequireUrl(string name) => ParseUrl(Require(name), name);
 
     /// <summary>
-    /// <c>{名前}</c> の差し込み口を持つ URL の型。差し込み口が全部あり、埋めたものが <see cref="RequireUrl"/> と同じ決まりに合うものだけを受ける
+    /// <c>{名前}</c> のプレースホルダを持つ URL のテンプレート。プレースホルダが全部あり、埋めたものが <see cref="RequireUrl"/> と同じ決まりに合うものだけを受ける
     /// </summary>
     public string RequireUrlTemplate(string name, params string[] placeholders)
     {

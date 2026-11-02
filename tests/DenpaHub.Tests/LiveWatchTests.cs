@@ -236,7 +236,7 @@ public class LiveWatchTests
     }
 
     [Test]
-    public async Task 失効の口は無い()
+    public async Task 失効のエンドポイントは無い()
     {
         await using var h = await Harness.StartAsync();
         using var response = await h.Server.PostAsync("/niconico/revoke", new FormUrlEncodedContent(new Dictionary<string, string> { ["token"] = "x" }));

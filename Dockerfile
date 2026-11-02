@@ -1,12 +1,12 @@
 # ---------------------------------------------------------------------------
-# denpa-hub。Native AOT で実行ファイル1個にし、distroless に置く。
+# denpa-hub。Native AOT で実行ファイル 1 個にし、distroless に置く。
 #
 # **arch ごとに、その arch のランナーで組む** (AOT のクロスはリンカの揃え直しが要るので、
 # 組む段を `--platform=$BUILDPLATFORM` にはしない)。土台は digest で留める。
 # ---------------------------------------------------------------------------
 FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b AS build
 ARG TARGETARCH
-# 上流へ送る User-Agent に載せる版 (CI がタグの名前を渡す)
+# 上流へ送る User-Agent に載せるバージョン (CI がタグの名前を渡す)
 ARG VERSION=0.0.0
 WORKDIR /build
 # AOT のリンクに clang と zlib が要る

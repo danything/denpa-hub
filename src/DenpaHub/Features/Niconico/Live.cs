@@ -7,9 +7,9 @@ namespace DenpaHub.Features.Niconico;
 /// 上流のパス・応答の形はコードに書かず、ここから渡す。
 /// </summary>
 /// <param name="Channels">局 (jk の ID) → ニコニコのチャンネルの ID</param>
-/// <param name="ProgramUrl">放送中の番組を引く URL の型 (<c>{channel}</c>)</param>
+/// <param name="ProgramUrl">放送中の番組を引く URL のテンプレート (<c>{channel}</c>)</param>
 /// <param name="ProgramField">その応答の番組の ID の場所 (JSON Pointer)</param>
-/// <param name="WatchUrl">視聴の接続先を引く URL の型 (<c>{program}</c>・<c>{user}</c>)</param>
+/// <param name="WatchUrl">視聴の接続先を引く URL のテンプレート (<c>{program}</c>・<c>{user}</c>)</param>
 /// <param name="WatchField">その応答の接続先の場所 (JSON Pointer)。無ければ応答から wss の URL を探す</param>
 public sealed record LiveSettings(
     IReadOnlyDictionary<string, string> Channels,

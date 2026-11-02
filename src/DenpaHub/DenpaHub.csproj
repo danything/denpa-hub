@@ -4,7 +4,7 @@
         各家庭の denpa から使う、Doa が動かす共通のサーバ (README.md)。
         機能ごとに Features/<名前>/ にまとめる。いまはニコニコの OAuth の中継だけ (docs/niconico.md)。
 
-        Native AOT で実行ファイル1個にし、distroless のイメージに置く。依存のパッケージは足さない
+        Native AOT で実行ファイル 1 個にし、distroless のイメージに置く。依存のパッケージは足さない
         (ASP.NET Core と System.Security.Cryptography だけで足りる)。
     -->
     <PropertyGroup>
