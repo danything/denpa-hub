@@ -38,7 +38,7 @@ denpa の画面         denpa-hub                     ニコニコ
 更新は denpa のサーバから `POST /niconico/token` で中継を通します (シークレットが要るため)。
 実況に書き込むときは、denpa のサーバが `POST /niconico/live/watch` で視聴の WebSocket の接続先を受け取り、そこへ自分で繋ぎます。
 
-ニコニコには失効の口が無いので、中継にもありません。連携を外すときは、denpa が手元のトークンを消し、
+ニコニコには失効のエンドポイントが無いので、中継にもありません。連携を外すときは、denpa が手元のトークンを消し、
 利用者にニコニコのアカウント設定から連携を取り消してもらいます。
 
 ## エンドポイント
@@ -48,7 +48,7 @@ denpa の画面         denpa-hub                     ニコニコ
 
 ### `GET /niconico/authorize`
 
-denpa の画面がブラウザごと飛ばしてくる入口です。
+denpa の画面からブラウザが移ってくるエンドポイントです。
 
 | クエリ   | 説明                                                                                                     |
 | -------- | -------------------------------------------------------------------------------------------------------- |
@@ -63,7 +63,7 @@ denpa の画面がブラウザごと飛ばしてくる入口です。
 
 ニコニコから戻ってくる先です (ドワンゴに登録するリダイレクト URI)。
 
-1. `state` を開きます。読めない・改ざんされている・期限 (10 分) を過ぎている・Cookie が合わない ときは 400 と短い文を返します。
+1. `state` を開きます。読めない・改ざんされている・期限 (10 分) を過ぎている・Cookie が合わないときは 400 と短い文を返します。
 2. Cookie を消します。
 3. `error` があれば (利用者が断ったなど)、`303 <戻り先>#error=<名前>` で返します。
 4. シークレットと PKCE の `code_verifier` を付けてコードをトークンに替え、応答の JSON を denpa の公開鍵で暗号化して `303 <戻り先>#result=<暗号文>` で返します。
@@ -77,6 +77,7 @@ denpa の画面がブラウザごと飛ばしてくる入口です。
 | `invalid_grant` など      | トークンのエンドポイントが返した `error` をそのまま           |
 | `token_exchange_failed`   | トークンのエンドポイントが `error` の無い失敗を返した         |
 | `invalid_token_response`  | 応答に `access_token` が無い                                  |
+| `unknown_error`           | ニコニコが返した `error` に使える文字が 1 つも無い            |
 | `temporarily_unavailable` | トークンのエンドポイントに届かない (15 秒で打ち切り)          |
 | `invalid_request`         | `code` も `error` も無いコールバック                          |
 
@@ -91,8 +92,8 @@ denpa のサーバが、トークンを更新するときに呼びます (`appli
 | `scope`         | 任意。あればそのまま送る |
 
 シークレットを付けてトークンのエンドポイントへ送り、**応答の状態コードと本文をそのまま返します** (`invalid_grant` なら denpa は連携をやり直してもらう)。
-届かなければ `502 {"error":"temporarily_unavailable"}`。`grant_type` がほかのもの (コードとの交換を含む) は `400 {"error":"unsupported_grant_type"}` で断ります —
-コードとの交換は、PKCE の verifier を持つコールバックの中だけで行います。
+届かなければ `502 {"error":"temporarily_unavailable"}`。`grant_type` がほかのもの (コードとの交換を含む) は `400 {"error":"unsupported_grant_type"}` で断ります。
+コードをトークンに替えるのは、PKCE の verifier を持つコールバックの中だけです。
 
 ### `POST /niconico/live/watch`
 
@@ -106,7 +107,7 @@ Content-Type: application/x-www-form-urlencoded
 channel=<jk の ID (jk1 など)>&user=<ニコニコのユーザー ID (id_token の sub)>
 ```
 
-中継は次の順に引きます。どれも利用者のアクセストークンを付けて送り、何も保存しません (毎回引き直す)。
+中継は次の順に引きます。2 と 3 は利用者のアクセストークンを付けて送ります。何も保存せず、毎回引き直します。
 
 1. 局 (`channel`) → ニコニコのチャンネル。設定の対応表 (`NICONICO_LIVE_CHANNELS`) で引く
 2. チャンネル → 放送中の番組。`NICONICO_LIVE_PROGRAM_URL` に送り、応答の `NICONICO_LIVE_PROGRAM_FIELD` の場所から番組の ID を読む
@@ -125,8 +126,6 @@ channel=<jk の ID (jk1 など)>&user=<ニコニコのユーザー ID (id_token 
 
 上流の応答の形がずれても止めずに、読める所を読みます。決めた場所に値が無ければ警告をログに出し、同じ名前のプロパティを応答の中から探します。
 接続先は、それでも見つからなければ応答の中の最初の `wss://` の URL を使います。
-
-`/niconico/revoke` はありません (ニコニコに失効の口が無いため。[流れ](#流れ))。
 
 ## state と PKCE
 
@@ -184,7 +183,7 @@ denpa のサーバはこの逆をします (どれも WebCrypto でできます:
 - ホストは次のどれか
   - IP アドレスで、ループバック (`127.0.0.0/8`・`::1`)・プライベート (`10.0.0.0/8`・`172.16.0.0/12`・`192.168.0.0/16`)・
     `100.64.0.0/10` (Tailscale などの VPN のアドレスもここ)・IPv6 のユニークローカル (`fc00::/7`)。IPv4 を写した IPv6 は IPv4 として見る
-  - `localhost`、`.local` (mDNS)・`.home.arpa` (RFC 8375) で終わる名前 — 家の中でしか引けない名前
+  - `localhost`、`.local` (mDNS)・`.home.arpa` (RFC 8375) で終わる名前 (家の中でしか引けない名前)
   - `NICONICO_ALLOWED_RETURN_HOSTS` に書いたホスト名 (https だけ)
 - 制御文字・空白・`\`・ASCII でない文字を含むもの、512 文字を超えるものは断る
 - 検査に通ったら、受け取った文字列ではなく**組み直した形** (`http://127.0.0.1/…` のように正規化したもの) だけを使う
@@ -205,10 +204,10 @@ denpa のサーバはこの逆をします (どれも WebCrypto でできます:
 
 ## ログ
 
-**残すもの:** 何が起きたか (`authorize: return=private`・`callback: delivered`・`callback rejected: binding`・`token: upstream 400`・`live watch: program upstream 404` など)、
+残すもの: 何が起きたか (`authorize: return=private`・`callback: delivered`・`callback rejected: binding`・`token: upstream 400`・`live watch: program upstream 404` など)、
 断ったわけの種類、ニコニコの状態コードと `error` の名前、例外の型の名前、上流の応答の形がずれたこと。
 
-**残さないもの:** シークレット・コード・state・Cookie・トークン (アクセス・更新とも)・戻り先の URL (家の LAN のアドレス)・接続元のアドレス・
+残さないもの: シークレット・コード・state・Cookie・トークン (アクセス・更新とも)・戻り先の URL (家の LAN のアドレス)・接続元のアドレス・
 クエリ文字列・視聴の接続先の URL・ニコニコのユーザー ID・局やチャンネルや番組の ID (外から来た値は写さない)。ASP.NET Core と HttpClient のログは URL を書くので、警告より下を出しません。
 テスト (`ログにシークレットやコードやトークンやstateを書かない`) が、連携と更新を通したあとのログの全部にこれらが無いことを確かめます。
 実況は `ログに接続先やトークンや利用者を書かない` が同じことを確かめます。
@@ -227,7 +226,7 @@ denpa のサーバはこの逆をします (どれも WebCrypto でできます:
 | `NICONICO_TOKEN_AUTH`           | 任意   | `client_secret_basic` (既定。Basic 認証) か `client_secret_post` (フォームに入れる)。資料に合わせる     |
 | `NICONICO_STATE_KEY`            | 要る   | state を暗号化する 32 バイトの鍵を base64 で (`openssl rand -base64 32`)。全部の台で同じものを使う      |
 | `NICONICO_ALLOWED_RETURN_HOSTS` | 任意   | 戻り先として https で通すホスト名 (カンマ区切り)                                                       |
-| `NICONICO_USER_AGENT`           | 任意   | ニコニコへの全リクエストに付ける User-Agent。既定は `denpa-hub/<版> (+https://github.com/danything/denpa-hub)` |
+| `NICONICO_USER_AGENT`           | 任意   | ニコニコへの全リクエストに付ける User-Agent。既定は `denpa-hub/<バージョン> (+https://github.com/danything/denpa-hub)` |
 | `NICONICO_LIVE_CHANNELS`        | 要る   | 局とニコニコのチャンネルの対応表。`jk1=<チャンネル>,jk2=<チャンネル>` の形 (どちらも英数字と `-` `_` `.`)         |
 | `NICONICO_LIVE_PROGRAM_URL`     | 要る   | 放送中の番組を引く URL。チャンネルを入れる所に `{channel}` を書く                                       |
 | `NICONICO_LIVE_PROGRAM_FIELD`   | 要る   | その応答で番組の ID がある場所 (JSON Pointer。`/a/b` の形)                                              |
@@ -238,8 +237,8 @@ URL は https だけを受けます (手元で試すときのため、ループ�
 
 ## 置く人が用意するもの
 
-- **ドワンゴに伝えるリダイレクト URI:** `<PUBLIC_ORIGIN>/niconico/callback` (例: `https://hub.example.jp/niconico/callback`)。起動時のログにも出ます。
-- **ドワンゴに伝えるアイコン** (認可の画面に出るもの)。
+- ドワンゴに伝えるリダイレクト URI: `<PUBLIC_ORIGIN>/niconico/callback` (例: `https://hub.example.jp/niconico/callback`)。起動時のログにも出ます。
+- ドワンゴに伝えるアイコン (認可の画面に出るもの)。
 - 上の[設定](#設定)の値。エンドポイントの URL・スコープ・クライアントの認証の方法・実況の API の URL と応答の形は、ドワンゴの資料から選びます。
   局とチャンネルの対応表は資料に無いので、置く人が用意します。
 - ドメイン・TLS・置き場・シークレットの渡し方は [README](../README.md#置く人が用意するもの)。
@@ -259,12 +258,12 @@ URL は https だけを受けます (手元で試すときのため、ループ�
    `400 invalid_grant` なら連携をやり直してもらう。
 6. 実況に書き込むときは、denpa のサーバが `POST https://<denpa-hub>/niconico/live/watch` (`Authorization: Bearer <access_token>`、`channel=jk1&user=<id_token の sub>`)
    で接続先を受け取り、自分で WebSocket に繋ぐ。`401 invalid_token` なら 1 回だけ更新してやり直す。接続先の URL は端末にもログにも出さない。
-7. 連携を外すときは、手元のトークンを消し、ニコニコのアカウント設定から連携を取り消せることを案内する (中継に失効の口は無い)。
+7. 連携を外すときは、手元のトークンを消し、ニコニコのアカウント設定から連携を取り消せることを案内する。
 
 ## 約款とのかかわり
 
-- **クライアント ID を第三者に使わせない (第10条(5))。** シークレットは中継だけが持ち、各家庭の denpa にも利用者にも渡しません。
-  ただし中継の入口はだれでも呼べるので、denpa 以外のソフトが同じ戻り先のパスを名乗って使うことは技術的には止められません
+- **クライアント ID を第三者に使わせない (第 10 条 (5))。** シークレットは中継だけが持ち、各家庭の denpa にも利用者にも渡しません。
+  ただし中継のエンドポイントはだれでも呼べるので、denpa 以外のソフトが同じ戻り先のパスを名乗って使うことは技術的には止められません
   (止めるには家ごとの登録が要ります)。決まったパス・LAN の戻り先・レート制限で、使える形を denpa に合わせて絞っています。
-- **受け取った情報を外に出さない (第14条)。** トークンも視聴の接続先も保存せず、ログにも書きません。denpa へは denpa の鍵で暗号化して渡します。
+- **受け取った情報を外に出さない (第 14 条)。** トークンも視聴の接続先も保存せず、ログにも書きません。denpa へは denpa の鍵で暗号化して渡します。
 - **ID・パスワードを保存しない。** ログインはニコニコの画面で行い、中継は ID もパスワードも見ません。

@@ -100,7 +100,7 @@ public static class NiconicoFeature
             Path = "/",
             Secure = true,
             HttpOnly = true,
-            // ニコニコからのリダイレクト (別サイトからのトップレベルの GET) で送られる強さ
+            // ニコニコからのリダイレクト (別サイトからのトップレベルの GET) でも送られる設定
             SameSite = SameSiteMode.Lax,
             MaxAge = StateLifetime,
         });
@@ -226,23 +226,19 @@ public static class NiconicoFeature
         List<KeyValuePair<string, string>> parameters = [new("grant_type", "refresh_token"), new("refresh_token", refreshToken)];
         var scope = form["scope"].ToString();
         if (scope.Length > 0) parameters.Add(new("scope", scope));
-        await Forward(context, "token", u => u.TokenAsync(parameters, context.RequestAborted));
-    }
 
-    static async Task Forward(HttpContext context, string name, Func<Upstream, Task<UpstreamResponse>> send)
-    {
         UpstreamResponse response;
         try
         {
-            response = await send(context.RequestServices.GetRequiredService<Upstream>());
+            response = await context.RequestServices.GetRequiredService<Upstream>().TokenAsync(parameters, context.RequestAborted);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
-            Log(context).LogWarning("{Name}: upstream unreachable ({Type})", name, e.GetType().Name);
+            Log(context).LogWarning("token: upstream unreachable ({Type})", e.GetType().Name);
             await Json(context, StatusCodes.Status502BadGateway, "temporarily_unavailable");
             return;
         }
-        Log(context).LogInformation("{Name}: upstream {Status}", name, (int)response.Status);
+        Log(context).LogInformation("token: upstream {Status}", (int)response.Status);
         context.Response.StatusCode = (int)response.Status;
         if (response.Body.Length == 0) return;
         context.Response.ContentType = response.ContentType ?? "application/json";
@@ -266,7 +262,7 @@ public static class NiconicoFeature
     }
 
     /// <summary>
-    /// 戻り先へ 303 で返す。値はフラグメントに入れる — フラグメントはブラウザから先へ送られないので、
+    /// 戻り先へ 303 で返す。値はフラグメントに入れる。フラグメントはブラウザから先へ送られないので、
     /// denpa の手前のプロキシのログや Referer に残らない
     /// </summary>
     static void Back(HttpContext context, string returnUrl, string name, string value)
