@@ -8,7 +8,7 @@ denpa は家ごとに置く録画サーバなので、家ごとにアドレス�
 
 | 機能                       | 説明                                                                                                  | 文書                                 |
 | -------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| ニコニコ OAuth の中継      | denpa の利用者が自分のニコニコのアカウントでニコニコ実況に書き込めるよう、認可とトークンの更新を中継する | [docs/niconico.md](docs/niconico.md) |
+| ニコニコ OAuth の中継      | denpa の利用者が自分のニコニコのアカウントでニコニコ実況に書き込めるよう、認可・トークンの更新・実況の視聴の接続先を中継する | [docs/niconico.md](docs/niconico.md) |
 
 機能は `src/DenpaHub/Features/<名前>/` にまとめ、`Hub.cs` で足します。機能をまたぐもの (ログの絞り・応答のヘッダ・プロキシ・
 レート制限の断り方・`/healthz`) だけが `Hub.cs` にあります。
@@ -61,7 +61,7 @@ main の `deploy/*.yaml` をそのまま同期します (Helm は使わない)�
 | `network-policy.yaml` | 届く相手を Gateway とノードに絞る CiliumNetworkPolicy                                             |
 
 `secrets.sops.yaml` には、[docs/niconico.md](docs/niconico.md#設定) の `NICONICO_*` を同じ名前で入れます
-(シークレットに加えて、平文で書かないニコニコ固有のエンドポイントとスコープも)。値は暗号化してあり、直すときは danything/gitops の
+(シークレットに加えて、平文で書かないニコニコ固有のエンドポイント・スコープ・応答の形と、局の対応表も)。値は暗号化してあり、直すときは danything/gitops の
 `tools/t sops edit deploy/secrets.sops.yaml` で開きます (鍵は `.sops.yaml`)。
 新しいバージョンを出すときは `v*` のタグを push し、CI が出したイメージのタグと digest を `deployment.yaml` に書きます。
 ghcr.io のパッケージは公開なので、引くための資格情報は要りません。
@@ -76,8 +76,8 @@ docker run --rm -v "$PWD:/src" -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
 docker build -t denpa-hub:local .
 ```
 
-テストは偽の OAuth 2.0 の認可サーバを同じプロセスに立て、連携の全体 (認可 → 同意 → コールバック → トークンの交換 → 暗号化して返す) と、
-更新・失効・戻り先の検査・ログに秘密が出ないことを確かめます。
+テストは偽のニコニコ (OAuth 2.0 の認可サーバと、パスも応答の形も偽物の実況の API) を同じプロセスに立て、連携の全体 (認可 → 同意 → コールバック → トークンの交換 → 暗号化して返す) と、
+更新・実況の接続先の中継・戻り先の検査・ログに秘密が出ないことを確かめます。
 
 CI (`.github/workflows/ci.yml`) は PR と main で build・テスト・イメージの組み立てを回し、`v*` のタグを push したときだけイメージを ghcr.io に push します。
 

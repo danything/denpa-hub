@@ -14,8 +14,8 @@ using Microsoft.Extensions.Logging;
 namespace DenpaHub.Tests;
 
 /// <summary>
-/// 偽のニコニコ (認可・トークン・失効のエンドポイント)。一般的な OAuth 2.0 の認可サーバとして振る舞い、
-/// 中継が送るもの (クライアントの認証・redirect_uri・PKCE) を確かめる。
+/// 偽のニコニコ (認可・トークンのエンドポイントと、実況の 2 つの API)。一般的な OAuth 2.0 の認可サーバとして振る舞い、
+/// 中継が送るもの (クライアントの認証・redirect_uri・PKCE・User-Agent) を確かめる。実況の API のパスと応答の形は、テストのためだけの偽物
 /// </summary>
 sealed class FakeProvider : IAsyncDisposable
 {
@@ -28,7 +28,12 @@ sealed class FakeProvider : IAsyncDisposable
 
     /// <summary>トークンのエンドポイントが返すもの。差し替えて失敗の形を試す</summary>
     public Func<HttpContext, Task>? TokenOverride { get; set; }
-    public List<string> RevokedTokens { get; } = [];
+    /// <summary>実況の API が返すもの。差し替えて失敗やずれた形を試す</summary>
+    public Func<HttpContext, Task>? ProgramOverride { get; set; }
+    public Func<HttpContext, Task>? WatchOverride { get; set; }
+    public const string WatchUrl = "wss://ws.provider.test/watch?ticket=ticket-secret-1";
+    public ConcurrentQueue<string> UserAgents { get; } = new();
+    public ConcurrentQueue<string> LiveRequests { get; } = new();
     public int TokenRequests;
 
     public HttpMessageHandler Handler => app.GetTestServer().CreateHandler();
@@ -41,9 +46,15 @@ sealed class FakeProvider : IAsyncDisposable
         builder.WebHost.UseTestServer();
         var app = builder.Build();
         var provider = new FakeProvider(app);
+        app.Use((context, next) =>
+        {
+            provider.UserAgents.Enqueue(context.Request.Headers.UserAgent.ToString());
+            return next(context);
+        });
         app.MapGet("/oauth/authorize", provider.Authorize);
         app.MapPost("/oauth/token", provider.Token);
-        app.MapPost("/oauth/revoke", provider.Revoke);
+        app.MapGet("/fake-live/program", provider.LiveProgram);
+        app.MapGet("/fake-live/watch", provider.LiveWatch);
         await app.StartAsync();
         return provider;
     }
@@ -112,15 +123,43 @@ sealed class FakeProvider : IAsyncDisposable
         }
     }
 
-    async Task Revoke(HttpContext context)
+    /// <summary>放送中の番組。チャンネル ch-off は放送していない</summary>
+    async Task LiveProgram(HttpContext context)
     {
-        if (!Authenticated(context))
+        LiveRequests.Enqueue($"program {context.Request.QueryString}");
+        if (ProgramOverride is not null)
         {
-            context.Response.StatusCode = 401;
+            await ProgramOverride(context);
             return;
         }
-        var form = await context.Request.ReadFormAsync();
-        lock (RevokedTokens) RevokedTokens.Add(form["token"].ToString());
+        if (!LiveAuthenticated(context)) return;
+        if (context.Request.Query["ch"] == "ch-off")
+        {
+            context.Response.StatusCode = 404;
+            return;
+        }
+        await context.Response.WriteAsync("{\"result\":{\"program\":\"pg-" + context.Request.Query["ch"] + "\"}}");
+    }
+
+    async Task LiveWatch(HttpContext context)
+    {
+        LiveRequests.Enqueue($"watch {context.Request.QueryString}");
+        if (WatchOverride is not null)
+        {
+            await WatchOverride(context);
+            return;
+        }
+        if (!LiveAuthenticated(context)) return;
+        await context.Response.WriteAsync("{\"endpoint\":{\"ws\":\"" + WatchUrl + "\",\"note\":\"ignored\"}}");
+    }
+
+    /// <summary>利用者のアクセストークン。access-1 だけが通り、noscope はスコープが足りない</summary>
+    static bool LiveAuthenticated(HttpContext context)
+    {
+        var header = context.Request.Headers.Authorization.ToString();
+        if (header == "Bearer access-1") return true;
+        context.Response.StatusCode = header == "Bearer noscope" ? 403 : 401;
+        return false;
     }
 
     static bool Authenticated(HttpContext context)
@@ -188,8 +227,12 @@ sealed class Harness : IAsyncDisposable
             ["NICONICO_CLIENT_SECRET"] = FakeProvider.ClientSecret,
             ["NICONICO_AUTHORIZE_URL"] = FakeProvider.Origin + "/oauth/authorize",
             ["NICONICO_TOKEN_URL"] = FakeProvider.Origin + "/oauth/token",
-            ["NICONICO_REVOKE_URL"] = FakeProvider.Origin + "/oauth/revoke",
             ["NICONICO_SCOPE"] = "openid offline_access",
+            ["NICONICO_LIVE_CHANNELS"] = "jk1=ch-1, jk211=ch-211, jk9=ch-off",
+            ["NICONICO_LIVE_PROGRAM_URL"] = FakeProvider.Origin + "/fake-live/program?ch={channel}",
+            ["NICONICO_LIVE_PROGRAM_FIELD"] = "/result/program",
+            ["NICONICO_LIVE_WATCH_URL"] = FakeProvider.Origin + "/fake-live/watch?program={program}&user={user}",
+            ["NICONICO_LIVE_WATCH_FIELD"] = "/endpoint/ws",
         };
         foreach (var (k, v) in overrides ?? []) env[k] = v;
         return env;

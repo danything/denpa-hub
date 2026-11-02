@@ -60,6 +60,8 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
+          # User-Agent に載せる版。タグのときだけタグの名前 (v を除く)
+          build-args: VERSION=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}
           push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           load: ${{ !startsWith(github.ref, 'refs/tags/v') }}
           tags: ghcr.io/${{ github.repository }}:${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci' }}

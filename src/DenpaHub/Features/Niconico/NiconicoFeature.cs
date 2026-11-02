@@ -28,12 +28,13 @@ public static class NiconicoFeature
 
     const string BrowserLimit = "niconico-browser";
     const string ServerLimit = "niconico-server";
+    const string LiveLimit = "niconico-live";
 
     public static void Add(IServiceCollection services, NiconicoSettings settings, HttpMessageHandler? upstream)
     {
         services.AddSingleton(settings);
         services.AddSingleton(new StateCodec(settings.StateKey));
-        services.AddSingleton(new Upstream(settings, Upstream.CreateHttpClient(upstream)));
+        services.AddSingleton(new Upstream(settings, Upstream.CreateHttpClient(upstream, settings.UserAgent)));
         services.Configure<RateLimiterOptions>(o =>
         {
             // 認可の画面への出入り。人の操作なので 1 分に 30 回あれば足りる
@@ -48,6 +49,12 @@ public static class NiconicoFeature
                 PermitLimit = 120,
                 Window = TimeSpan.FromMinutes(1),
             }));
+            // 実況の視聴の接続先。1 つの家は番組の替わり目や繋ぎ直しで引くくらいだが、CGNAT で多くの家が 1 つのアドレスを共有しうる
+            o.AddPolicy(LiveLimit, ctx => RateLimitPartition.GetFixedWindowLimiter(Hub.ClientKey(ctx), _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+            }));
         });
     }
 
@@ -56,7 +63,7 @@ public static class NiconicoFeature
         app.MapGet("/niconico/authorize", (RequestDelegate)Authorize).RequireRateLimiting(BrowserLimit);
         app.MapGet(CallbackPath, (RequestDelegate)Callback).RequireRateLimiting(BrowserLimit);
         app.MapPost("/niconico/token", (RequestDelegate)Token).RequireRateLimiting(ServerLimit);
-        app.MapPost("/niconico/revoke", (RequestDelegate)Revoke).RequireRateLimiting(ServerLimit);
+        app.MapPost(LiveFeature.WatchPath, (RequestDelegate)LiveFeature.Watch).RequireRateLimiting(LiveLimit);
     }
 
     /// <summary>denpa の画面から飛んでくる。state を作ってニコニコの認可の画面へ送る</summary>
@@ -222,27 +229,6 @@ public static class NiconicoFeature
         await Forward(context, "token", u => u.TokenAsync(parameters, context.RequestAborted));
     }
 
-    /// <summary>連携を外すときの失効 (RFC 7009)。NICONICO_REVOKE_URL が無ければ 404</summary>
-    static async Task Revoke(HttpContext context)
-    {
-        if (context.RequestServices.GetRequiredService<NiconicoSettings>().RevocationEndpoint is null)
-        {
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
-            return;
-        }
-        var form = await ReadForm(context);
-        var token = form?["token"].ToString() ?? "";
-        if (token.Length == 0)
-        {
-            await Json(context, StatusCodes.Status400BadRequest, "invalid_request");
-            return;
-        }
-        List<KeyValuePair<string, string>> parameters = [new("token", token)];
-        var hint = form!["token_type_hint"].ToString();
-        if (hint.Length > 0) parameters.Add(new("token_type_hint", hint));
-        await Forward(context, "revoke", u => u.RevokeAsync(parameters, context.RequestAborted));
-    }
-
     static async Task Forward(HttpContext context, string name, Func<Upstream, Task<UpstreamResponse>> send)
     {
         UpstreamResponse response;
@@ -264,7 +250,7 @@ public static class NiconicoFeature
     }
 
     /// <summary>フォームを読む。中身はトークン 1 つ分なので、大きいものは読まない</summary>
-    static async Task<IFormCollection?> ReadForm(HttpContext context)
+    internal static async Task<IFormCollection?> ReadForm(HttpContext context)
     {
         if (!context.Request.HasFormContentType) return null;
         var limit = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
@@ -346,8 +332,7 @@ public static class NiconicoFeature
 
     static string Hash(string value) => Base64Url.EncodeToString(SHA256.HashData(Encoding.ASCII.GetBytes(value)));
 
-
-    static ILogger Log(HttpContext context) => context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("DenpaHub.Niconico");
+    internal static ILogger Log(HttpContext context) => context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("DenpaHub.Niconico");
 
     static Task Text(HttpContext context, int status, string message)
     {
@@ -356,7 +341,7 @@ public static class NiconicoFeature
         return context.Response.WriteAsync(message);
     }
 
-    static Task Json(HttpContext context, int status, string error)
+    internal static Task Json(HttpContext context, int status, string error)
     {
         context.Response.StatusCode = status;
         context.Response.ContentType = "application/json";

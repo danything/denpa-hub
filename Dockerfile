@@ -6,6 +6,8 @@
 # ---------------------------------------------------------------------------
 FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b AS build
 ARG TARGETARCH
+# 上流へ送る User-Agent に載せる版 (CI がタグの名前を渡す)
+ARG VERSION=0.0.0
 WORKDIR /build
 # AOT のリンクに clang と zlib が要る
 RUN apt-get update && \
@@ -18,7 +20,7 @@ RUN case "${TARGETARCH:-amd64}" in \
       arm64) rid=linux-arm64 ;; \
       *) echo "対応していない arch: ${TARGETARCH}" >&2; exit 1 ;; \
     esac && \
-    dotnet publish src/DenpaHub/DenpaHub.csproj -c Release -r "${rid}" -o /out && \
+    dotnet publish src/DenpaHub/DenpaHub.csproj -c Release -r "${rid}" -p:Version="${VERSION#v}" -o /out && \
     rm -f /out/*.dbg
 
 # ---------------------------------------------------------------------------
