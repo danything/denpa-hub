@@ -1,7 +1,7 @@
 # denpa-hub 本体。状態を持たないので Deployment 1 つ (台数を増やしても同じ Secret で動く)。
 #
 # 設定のうちリポジトリに書いてよいものはここに、書かないもの (シークレットとニコニコ固有の値) は
-# SOPS で暗号化した secrets.sops.yaml から sops-secrets-operator が作る Secret denpa-hub にあり、envFrom で全部読む。
+# SOPS で暗号化した secrets.sops.yaml・live.sops.yaml から sops-secrets-operator が作る Secret denpa-hub・denpa-hub-live にあり、envFrom で全部読む。
 # 値を書き換えると、Reloader の注釈で Pod が入れ替わる。
 #
 # イメージは v* のタグを push すると CI が ghcr.io に出す。入れ替えるときはタグと digest を両方書き換える。
@@ -68,9 +68,16 @@ spec:
                 162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,
                 2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,
                 2a06:98c0::/29,2c0f:f248::/32
+            # 局 (jk の ID) → ニコニコのチャンネル ID。KonomiTV・NX-Jikkyo の公開の対応のうち、公式の実況にチャンネルがある局
+            - name: NICONICO_LIVE_CHANNELS
+              value: >-
+                jk1=ch2646436,jk2=ch2646437,jk4=ch2646438,jk5=ch2646439,jk6=ch2646440,
+                jk7=ch2646441,jk8=ch2646442,jk9=ch2646485,jk101=ch2647992,jk211=ch2646846
           envFrom:
             - secretRef:
                 name: denpa-hub
+            - secretRef:
+                name: denpa-hub-live
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
