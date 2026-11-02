@@ -2,7 +2,7 @@
 # (Gateway の Envoy の送信元は cilium_host のアドレスで、ノードや起動ごとに変わりうるため、アドレスでは絞れない)。
 # そのままだと、クラスタの中のどの Pod も X-Forwarded-For を偽ってレート制限の単位を変えられるので、
 # 「届く相手」の側を Gateway (ingress) とノード (host・remote-node。kubelet の生存確認) に絞る。
-# 出ていく方 (ニコニコのトークンのエンドポイント・DNS) は絞らない
+# 出ていく方 (ニコニコのトークンのエンドポイントと実況の API・DNS) は絞らない
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

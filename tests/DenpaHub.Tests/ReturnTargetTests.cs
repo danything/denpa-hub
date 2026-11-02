@@ -103,6 +103,14 @@ public class SettingsTests
     [Arguments("NICONICO_TOKEN_AUTH", "private_key_jwt")]
     [Arguments("NICONICO_CLIENT_SECRET", null)]
     [Arguments("TRUSTED_PROXIES", "10.0.0.1/99")]
+    [Arguments("NICONICO_LIVE_CHANNELS", null)]
+    [Arguments("NICONICO_LIVE_CHANNELS", "jk1")]
+    [Arguments("NICONICO_LIVE_CHANNELS", "jk1=ch-a,jk1=ch-b")]
+    [Arguments("NICONICO_LIVE_CHANNELS", "jk1=ch/a")]
+    [Arguments("NICONICO_LIVE_PROGRAM_URL", "https://provider.example/program")]
+    [Arguments("NICONICO_LIVE_WATCH_URL", "http://provider.example/w?p={program}&u={user}")]
+    [Arguments("NICONICO_LIVE_PROGRAM_FIELD", "result")]
+    [Arguments("NICONICO_USER_AGENT", "denpa\u0001hub")]
     public async Task 誤った設定は名前だけを言って止める(string name, string? value)
     {
         var env = Harness.Env(new() { [name] = value });

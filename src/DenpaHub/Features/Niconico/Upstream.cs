@@ -8,24 +8,17 @@ namespace DenpaHub.Features.Niconico;
 public sealed record UpstreamResponse(HttpStatusCode Status, string? ContentType, byte[] Body);
 
 /// <summary>
-/// ニコニコのトークン・失効のエンドポイントへ、クライアントのシークレットを付けて送る。
-/// シークレットを使うのはここだけ。
+/// ニコニコへのリクエスト。トークンのエンドポイントにはクライアントのシークレットを付けて送る (シークレットを使うのはここだけ)。
+/// 実況の API には利用者のアクセストークンを付けて送る。
 /// </summary>
 public sealed class Upstream(NiconicoSettings settings, HttpClient http)
 {
     /// <summary>トークンの応答は ID トークンを含めても数 KB。これを超えるものは読まずに断る</summary>
     const int MaxBody = 64 * 1024;
 
-    public Task<UpstreamResponse> TokenAsync(List<KeyValuePair<string, string>> form, CancellationToken ct) =>
-        PostAsync(settings.TokenEndpoint, form, ct);
-
-    public Task<UpstreamResponse> RevokeAsync(List<KeyValuePair<string, string>> form, CancellationToken ct) =>
-        PostAsync(settings.RevocationEndpoint ?? throw new InvalidOperationException("失効のエンドポイントが設定されていません"), form, ct);
-
-    async Task<UpstreamResponse> PostAsync(Uri url, List<KeyValuePair<string, string>> form, CancellationToken ct)
+    public Task<UpstreamResponse> TokenAsync(List<KeyValuePair<string, string>> form, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        var request = new HttpRequestMessage(HttpMethod.Post, settings.TokenEndpoint);
         if (settings.TokenAuth == TokenAuthMethod.ClientSecretBasic)
         {
             // RFC 6749 2.3.1: ID とシークレットはフォームの形でエスケープしてから Basic にする
@@ -38,7 +31,21 @@ public sealed class Upstream(NiconicoSettings settings, HttpClient http)
             form.Add(new("client_secret", settings.ClientSecret));
         }
         request.Content = new FormUrlEncodedContent(form);
+        return SendAsync(request, ct);
+    }
 
+    /// <summary>利用者のアクセストークン (Bearer) を付けて GET する</summary>
+    public Task<UpstreamResponse> GetAsync(Uri url, string accessToken, CancellationToken ct)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        return SendAsync(request, ct);
+    }
+
+    async Task<UpstreamResponse> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        using var _ = request;
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var buffer = new MemoryStream();
@@ -52,9 +59,15 @@ public sealed class Upstream(NiconicoSettings settings, HttpClient http)
         return new UpstreamResponse(response.StatusCode, response.Content.Headers.ContentType?.MediaType, buffer.ToArray());
     }
 
-    public static HttpClient CreateHttpClient(HttpMessageHandler? handler) =>
-        new(handler ?? new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false })
+    /// <summary>上流へのクライアント。どのリクエストにも User-Agent を付ける (どのソフトからのアクセスかを上流が分かるように)</summary>
+    public static HttpClient CreateHttpClient(HttpMessageHandler? handler, string userAgent)
+    {
+        var client = new HttpClient(handler ?? new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false })
         {
             Timeout = TimeSpan.FromSeconds(15),
         };
+        // 値は設定の読み込みで印字できる ASCII に絞ってある。製品とコメントの形に限らず、そのまま送る
+        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", userAgent);
+        return client;
+    }
 }

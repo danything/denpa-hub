@@ -259,27 +259,6 @@ public class TokenTests
     }
 
     [Test]
-    public async Task 失効をニコニコへ送る()
-    {
-        await using var h = await Harness.StartAsync();
-        using var response = await h.Server.PostAsync("/niconico/revoke", new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["token"] = "refresh-1",
-            ["token_type_hint"] = "refresh_token",
-        }));
-        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
-        await Assert.That(h.Provider.RevokedTokens).Contains("refresh-1");
-    }
-
-    [Test]
-    public async Task 失効のエンドポイントが無ければ_404()
-    {
-        await using var h = await Harness.StartAsync(new() { ["NICONICO_REVOKE_URL"] = null });
-        using var response = await h.Server.PostAsync("/niconico/revoke", new FormUrlEncodedContent(new Dictionary<string, string> { ["token"] = "x" }));
-        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.NotFound);
-    }
-
-    [Test]
     public async Task 同じアドレスから続けて来ると_429()
     {
         await using var h = await Harness.StartAsync();

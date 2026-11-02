@@ -33,7 +33,22 @@ public sealed class Env(Func<string, string?> source)
     /// <summary>https だけを受ける。手元で試すときのために、ループバックのホストだけは http も通す</summary>
     public Uri RequireUrl(string name) => ParseUrl(Require(name), name);
 
-    public Uri? GetUrl(string name) => Get(name) is { } value ? ParseUrl(value, name) : null;
+    /// <summary>
+    /// <c>{名前}</c> の差し込み口を持つ URL の型。差し込み口が全部あり、埋めたものが <see cref="RequireUrl"/> と同じ決まりに合うものだけを受ける
+    /// </summary>
+    public string RequireUrlTemplate(string name, params string[] placeholders)
+    {
+        var template = Require(name);
+        var sample = template;
+        foreach (var placeholder in placeholders)
+        {
+            if (!template.Contains($"{{{placeholder}}}", StringComparison.Ordinal))
+                throw new SettingsException($"{name} に {{{placeholder}}} を入れてください");
+            sample = sample.Replace($"{{{placeholder}}}", "x", StringComparison.Ordinal);
+        }
+        ParseUrl(sample, name);
+        return template;
+    }
 
     public IEnumerable<string> GetList(string name) =>
         (Get(name) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

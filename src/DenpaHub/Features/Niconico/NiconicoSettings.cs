@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace DenpaHub.Features.Niconico;
 
 /// <summary>トークンのエンドポイントにクライアントを名乗る方法 (RFC 6749 2.3.1。名前は RFC 8414 の登録名)</summary>
@@ -9,7 +11,7 @@ public enum TokenAuthMethod
 
 /// <summary>
 /// ニコニコの OAuth の中継の設定。名前と意味は docs/niconico.md の「設定」。
-/// ニコニコ固有の値 (エンドポイントの URL・スコープ) はコードに書かず、ここから渡す。
+/// ニコニコ固有の値 (エンドポイントの URL・スコープ・応答の形) はコードに書かず、ここから渡す。
 /// </summary>
 public sealed record NiconicoSettings(
     string RedirectUri,
@@ -18,10 +20,11 @@ public sealed record NiconicoSettings(
     string ClientSecret,
     Uri AuthorizeEndpoint,
     Uri TokenEndpoint,
-    Uri? RevocationEndpoint,
     string? Scope,
     TokenAuthMethod TokenAuth,
-    IReadOnlySet<string> AllowedReturnHosts)
+    IReadOnlySet<string> AllowedReturnHosts,
+    string UserAgent,
+    LiveSettings Live)
 {
     public static NiconicoSettings Load(Env env, HubSettings hub)
     {
@@ -59,9 +62,32 @@ public sealed record NiconicoSettings(
             ClientSecret: env.Require("NICONICO_CLIENT_SECRET"),
             AuthorizeEndpoint: env.RequireUrl("NICONICO_AUTHORIZE_URL"),
             TokenEndpoint: env.RequireUrl("NICONICO_TOKEN_URL"),
-            RevocationEndpoint: env.GetUrl("NICONICO_REVOKE_URL"),
             Scope: env.Get("NICONICO_SCOPE"),
             TokenAuth: auth,
-            AllowedReturnHosts: hosts);
+            AllowedReturnHosts: hosts,
+            UserAgent: LoadUserAgent(env),
+            Live: LiveSettings.Load(env));
+    }
+
+    /// <summary>上流への全リクエストに付ける User-Agent の既定。どのソフトからのアクセスかが分かる、公開してよい値</summary>
+    public static string DefaultUserAgent
+    {
+        get
+        {
+            var version = typeof(NiconicoSettings).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
+            // ビルドが足すコミットの印 (+<sha>) は外す
+            var plus = version.IndexOf('+');
+            return $"denpa-hub/{(plus < 0 ? version : version[..plus])} (+https://github.com/danything/denpa-hub)";
+        }
+    }
+
+    static string LoadUserAgent(Env env)
+    {
+        var value = env.Get("NICONICO_USER_AGENT");
+        if (value is null) return DefaultUserAgent;
+        if (value.Length > 256 || value.Any(c => c is < ' ' or > '~'))
+            throw new SettingsException("NICONICO_USER_AGENT は 256 文字までの ASCII の印字できる文字で書いてください");
+        return value;
     }
 }
