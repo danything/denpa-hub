@@ -1,8 +1,8 @@
 # denpa-hub 本体。状態を持たないので Deployment 1 つ (台数を増やしても同じ Secret で動く)。
 #
 # 設定のうちリポジトリに書いてよいものはここに、書かないもの (シークレットとニコニコ固有の値) は
-# Infisical から作る Secret denpa-hub (secret.yaml) にあり、envFrom で全部読む。
-# Infisical の値を書き換えると、auto-reload の注釈で Pod が入れ替わる。
+# SOPS で暗号化した secrets.sops.yaml から sops-secrets-operator が作る Secret denpa-hub にあり、envFrom で全部読む。
+# 値を書き換えると、Reloader の注釈で Pod が入れ替わる。
 #
 # イメージは v* のタグを push すると CI が ghcr.io に出す。入れ替えるときはタグと digest を両方書き換える。
 # ghcr.io のパッケージは公開 (danything の既定) なので imagePullSecrets は要らない
@@ -25,7 +25,7 @@ metadata:
   name: denpa-hub
   namespace: denpa-hub
   annotations:
-    secrets.infisical.com/auto-reload: "true"
+    reloader.stakater.com/auto: "true"
 spec:
   replicas: 1
   selector:
