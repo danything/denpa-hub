@@ -1,0 +1,8 @@
+# deploy/ の秘密 (SopsSecret) を SOPS (age) で暗号化する規則。danything/gitops の .sops.yaml の「アプリの秘密」と同じ 2 つの鍵
+# (管理者の鍵とクラスタの鍵。クラスタの中では sops-secrets-operator が復号する)。値 (data・stringData) だけ暗号化する。
+# 直すときは danything/gitops の `tools/t sops edit <このリポジトリのファイル>` で開いて push する。
+creation_rules:
+  - path_regex: ^deploy/.*\.sops\.yaml$
+    encrypted_regex: ^(data|stringData)$
+    mac_only_encrypted: true
+    age: age1sgnnkn67wpt4wgjsff4c36w3cmjkk557ng504e4aczx2lzls9y6ssy0x9r,age1z36xmmvjmwg4sus6k8nx6wgp8qyew7tj76077rvv5sagcgudd4tszrmwml

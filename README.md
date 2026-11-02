@@ -56,12 +56,13 @@ main の `deploy/*.yaml` をそのまま同期します (Helm は使わない)�
 | `argocd.yaml`         | ApplicationSet が読む、この置き場の設定 (namespace `denpa-hub`)                                   |
 | `namespace.yaml`      | PSA を restricted にするラベル                                                                    |
 | `deployment.yaml`     | Deployment と Service。`PUBLIC_ORIGIN`・`TRUSTED_PROXIES` とイメージ (タグと digest) はここ        |
-| `secret.yaml`         | InfisicalSecret。Infisical の `doa` / `prod` / `/denpa-hub/denpa-hub` から Secret `denpa-hub` を作る |
+| `secrets.sops.yaml`   | SopsSecret。SOPS で暗号化した値から、sops-secrets-operator が Secret `denpa-hub` を作る |
 | `httproute.yaml`      | Gateway `kube-system/doany` の `https` のリスナーに `dh.doany.io` を載せる (Cloudflare を通す)    |
 | `network-policy.yaml` | 届く相手を Gateway とノードに絞る CiliumNetworkPolicy                                             |
 
-Infisical の `/denpa-hub/denpa-hub` には、[docs/niconico.md](docs/niconico.md#設定) の `NICONICO_*` を同じ名前で入れます
-(シークレットに加えて、リポジトリに書かないニコニコ固有のエンドポイントとスコープも)。
+`secrets.sops.yaml` には、[docs/niconico.md](docs/niconico.md#設定) の `NICONICO_*` を同じ名前で入れます
+(シークレットに加えて、平文で書かないニコニコ固有のエンドポイントとスコープも)。値は暗号化してあり、直すときは danything/gitops の
+`tools/t sops edit deploy/secrets.sops.yaml` で開きます (鍵は `.sops.yaml`)。
 新しいバージョンを出すときは `v*` のタグを push し、CI が出したイメージのタグと digest を `deployment.yaml` に書きます。
 ghcr.io のパッケージは公開なので、引くための資格情報は要りません。
 
