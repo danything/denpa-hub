@@ -144,7 +144,7 @@ public static class NiconicoFeature
         var error = query["error"].ToString();
         if (error.Length > 0)
         {
-            Log(context).LogInformation("callback: provider error {Error}", ErrorCode(error));
+            Log(context).LogInformation("callback: provider error {Error}", LoggedError(error));
             Back(context, payload.Return, "error", ErrorCode(error));
             return;
         }
@@ -288,6 +288,22 @@ public static class NiconicoFeature
         context.Response.StatusCode = StatusCodes.Status303SeeOther;
         context.Response.Headers.Location = $"{returnUrl}#{name}={value}";
     }
+
+    /// <summary>
+    /// ログに出す error の名前。RFC 6749 4.1.2.1 の名前だけをそのまま書き、ほかは "other" にまとめる。
+    /// 外から来た値をログに写さない (改行などでログの行を偽れないように)
+    /// </summary>
+    static string LoggedError(string value) => value switch
+    {
+        "invalid_request" => "invalid_request",
+        "unauthorized_client" => "unauthorized_client",
+        "access_denied" => "access_denied",
+        "unsupported_response_type" => "unsupported_response_type",
+        "invalid_scope" => "invalid_scope",
+        "server_error" => "server_error",
+        "temporarily_unavailable" => "temporarily_unavailable",
+        _ => "other",
+    };
 
     /// <summary>error の値は英小文字・数字・_ だけにして長さも切る (戻り先の URL にそのまま入れるので)</summary>
     static string ErrorCode(string value)
