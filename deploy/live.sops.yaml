@@ -1,0 +1,44 @@
+# denpa-hub の実況の視聴の接続先を引く設定 (POST /niconico/live/watch)。ニコニコ固有の値なので平文で書かない。
+# キーは環境変数の名前そのまま (docs/niconico.md の「設定」)。Deployment が envFrom で全部読む。
+#   NICONICO_LIVE_PROGRAM_URL / NICONICO_LIVE_PROGRAM_FIELD … チャンネルの放送中の番組を引く URL と、応答の番組の ID の場所
+#   NICONICO_LIVE_WATCH_URL … 視聴の WebSocket の接続先を引く URL。応答の形が資料に無いので NICONICO_LIVE_WATCH_FIELD は置かない (最初の wss:// の URL を使う)
+# 局の対応表 (NICONICO_LIVE_CHANNELS) は秘密ではないので deployment.yaml に平文で書いてある。
+# 値は SOPS で暗号化してある (../.sops.yaml)。直すときは danything/gitops の `tools/t sops edit <このファイル>` で開いて push する。
+# クラスタの中では sops-secrets-operator が Secret にし、Reloader の注釈で Deployment が入れ替わる。
+apiVersion: isindir.github.com/v1alpha3
+kind: SopsSecret
+metadata:
+    name: live
+    namespace: denpa-hub
+spec:
+    secretTemplates:
+        - name: denpa-hub-live
+          stringData:
+            NICONICO_LIVE_PROGRAM_URL: ENC[AES256_GCM,data:BaKqy5itrqNvpt/Y9x/B9CCcxdd1mGP6mjwjqzW6zf8qT0agkAEjTA39ClDdPgQXqPJlqp03BbNGDIeEe83bIIANyyNZnvNQEe1L6Wyd+Jc=,iv:0EAK5vOnZk50dC6oicQlT0rqNPMGZYJeCOTiTuQZ06c=,tag:G9arKUTFQz++adACSZ+Vvg==,type:str]
+            NICONICO_LIVE_PROGRAM_FIELD: ENC[AES256_GCM,data:Tjm4xoVQE0WsWke3+CO+,iv:8a8WzKOL4AqTOSSJcE7SnYP2T2PieZKnnPDlvbQ9dVM=,tag:VJO2dw0WgEXEQt7eBsq4SA==,type:str]
+            NICONICO_LIVE_WATCH_URL: ENC[AES256_GCM,data:2MXNBbdNbb3hwbg8xby2MAVR9CNj32jz5FAQOnlvpz2AxTIeC89gm5Zu+ZuJcB0Zmrt/fNbWMkLmQyhx+z3PzH7wLiff7UhE3NrsEe0yh36roGyAHaU/sfph,iv:qoZpd6fyFpVAEb16nUpCMrzqDnn360a1IuYjnF48WmI=,tag:ZUgmva+kG01/PHvKy+PF9g==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBndzVhWGZXa21XcktXWHN1
+            TkVhWnhpNTd0MlJmVHFrYitCWFBMZTEwRUdRClFaSUdCWDZPOHNCSGhuazMxSTdV
+            SjVFSXNBa29xbVFCd3RwNTJLcVpYZk0KLS0tIFI4RlN4eERiSnRSa1hQdTR6czRE
+            WHdmWTRpMUlUWk84ZnNteFB1aENZWUUKPR+SooqtkFQ+f7ZxrixfWqx6McgYTKQJ
+            MI79FQa570yPigmEk594VVkgZc5Y+uam0RvF0gQl6zp8VbZXEcNLhg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1sgnnkn67wpt4wgjsff4c36w3cmjkk557ng504e4aczx2lzls9y6ssy0x9r
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBkeE1uTU9XZnFJa1N0eHpG
+            Z3ZVN0N0aWZ5Z1kvR2MvYXo2ZW5NNFVZVGdrCmcyOTcvZExzS3dyM21BdG5mOWts
+            SG5jSmJWYjhVclpZM3orMkJHSThwejQKLS0tIFI1Y0NPbHNjRGNDZUlXUnBHaytK
+            RS9mc1ZHWFkyc0pMTFA1VWxnaFp4TkEKviikkhwFIcRxOP/P2FZj0KKkbjSkOJ8I
+            ExiTyWwNaU6shzcNUAcq8lfa1rOyEuCcP4SALpafxcF0kIJ7+ePbWA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1z36xmmvjmwg4sus6k8nx6wgp8qyew7tj76077rvv5sagcgudd4tszrmwml
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-02T08:09:51Z"
+    mac: ENC[AES256_GCM,data:HkCJLnk1b4d0qgZv6fFZQUD4bBnNaNr2Hm3QT35cORSm4M8ooQkx/4WAFbHcu3hmqVObSzQplf9RE7KwL+pX3DTEX2M41lh6s8M1h63+UM+rKYoC4obLo81rxSTPOF7wwAMM/Qnbf1PyA8XbUHGhy7KZdxnuPYTyGYEtdEyxWXk=,iv:UGvJygETqo9iH4rxJWa5H5WaFavX6zaiTErSOwxZSpM=,tag:0Zb4znppVozWx9czEbup8g==,type:str]
+    mac_only_encrypted: true
+    version: 3.13.3

@@ -57,12 +57,14 @@ main の `deploy/*.yaml` をそのまま同期します (Helm は使わない)�
 | `namespace.yaml`      | PSA を restricted にするラベル                                                                    |
 | `deployment.yaml`     | Deployment と Service。`PUBLIC_ORIGIN`・`TRUSTED_PROXIES` とイメージ (タグと digest) はここ        |
 | `secrets.sops.yaml`   | SopsSecret。SOPS で暗号化した値から、sops-secrets-operator が Secret `denpa-hub` を作る |
+| `live.sops.yaml`      | SopsSecret。実況の番組と視聴の接続先を引く設定の Secret `denpa-hub-live`                    |
 | `httproute.yaml`      | Gateway `kube-system/doany` の `https` のリスナーに `dh.doany.io` を載せる (Cloudflare を通す)    |
 | `network-policy.yaml` | 届く相手を Gateway とノードに絞る CiliumNetworkPolicy                                             |
 
 `secrets.sops.yaml` には、[docs/niconico.md](docs/niconico.md#設定) の `NICONICO_*` を同じ名前で入れます
-(シークレットに加えて、平文で書かないニコニコ固有のエンドポイント・スコープ・応答の形と、局の対応表も)。値は暗号化してあり、直すときは danything/gitops の
-`tools/t sops edit deploy/secrets.sops.yaml` で開きます (鍵は `.sops.yaml`)。
+(シークレットに加えて、平文で書かないニコニコ固有のエンドポイント・スコープ)。実況の番組と視聴の接続先を引く URL・応答の形は `live.sops.yaml` に、
+秘密ではない局の対応表 (`NICONICO_LIVE_CHANNELS`) は `deployment.yaml` にあります。値は暗号化してあり、直すときは danything/gitops の
+`tools/t sops edit deploy/<ファイル>` で開きます (鍵は `.sops.yaml`)。
 新しいバージョンを出すときは `v*` のタグを push し、CI が出したイメージのタグと digest を `deployment.yaml` に書きます。
 ghcr.io のパッケージは公開なので、引くための資格情報は要りません。
 
