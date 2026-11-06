@@ -4,7 +4,7 @@
 # **arch ごとに、その arch のランナーで組む** (AOT のクロスはリンカの揃え直しが要るので、
 # 組む段を `--platform=$BUILDPLATFORM` にはしない)。土台は digest で留める。
 # ---------------------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:de4fe90a98845d75910b9769662465c84de1a934665c431279d1382b2bddc02b AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e AS build
 ARG TARGETARCH
 # 上流へ送る User-Agent に載せるバージョン (CI がタグの名前を渡す)
 ARG VERSION=0.0.0
