@@ -70,10 +70,10 @@ ghcr.io のパッケージは公開なので、引くための資格情報は要
 
 ## 開発
 
-.NET 10 の SDK で組みます。手元に SDK を入れない場合は、コンテナで動かします。
+.NET 11 の SDK で組みます。手元に SDK を入れない場合は、コンテナで動かします。
 
 ```sh
-docker run --rm -v "$PWD:/src" -w /src mcr.microsoft.com/dotnet/sdk:10.0 \
+docker run --rm -v "$PWD:/src" -w /src mcr.microsoft.com/dotnet/sdk:11.0 \
   sh -c "dotnet build denpa-hub.slnx -warnaserror && dotnet test --project tests/DenpaHub.Tests"
 docker build -t denpa-hub:local .
 ```
