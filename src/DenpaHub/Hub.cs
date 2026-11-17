@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.RateLimiting;
 namespace DenpaHub;
 
 /// <summary>
-/// サーバの組み立て。機能をまたぐもの (ログの出力レベル・応答のヘッダ・プロキシ・レート制限の断り方・/healthz) だけをここに置き、
+/// サーバの組み立て。機能をまたぐもの (ログの出力レベル・応答のヘッダ・エラーの JSON・プロキシ・レート制限の断り方・/healthz) だけをここに置き、
 /// 各機能は Features/&lt;名前&gt;/ の Add と Map で足す
 /// </summary>
 public static class Hub
@@ -76,6 +76,14 @@ public static class Hub
         http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         http.Response.ContentType = "text/plain; charset=utf-8";
         return http.Response.WriteAsync("時間をおいてやり直してください。", ct);
+    }
+
+    /// <summary>JSON で返すエラー (<c>{"error":"&lt;名前&gt;"}</c>)。名前は各機能の文書の契約にある固定の値だけで、外から来た値は入れない</summary>
+    public static Task ErrorAsync(HttpContext context, int status, string error)
+    {
+        context.Response.StatusCode = status;
+        context.Response.ContentType = "application/json";
+        return context.Response.WriteAsync($$"""{"error":"{{error}}"}""");
     }
 
     /// <summary>レート制限を分ける単位。TRUSTED_PROXIES があれば X-Forwarded-For から取った利用者のアドレス</summary>

@@ -7,7 +7,7 @@ using Microsoft.Data.Sqlite;
 namespace DenpaHub.Features.Ranking;
 
 /// <summary>トークンの記録。<paramref name="SentAt"/> は最後に送った時刻 (Unix 秒)。まだ送っていなければ null</summary>
-public sealed record TokenRecord(byte[] Hash, long? SentAt);
+public sealed record TokenRecord(long? SentAt);
 
 /// <summary>順位の元になる放送 1 つ。名前などは票を入れたトークンの多いもの</summary>
 public sealed record Candidate(AiringId Id, int Manual, int Rule, string Name, string ServiceName, IReadOnlyList<int> Genres, long StartAt);
@@ -119,7 +119,7 @@ public sealed class RankingStore : IDisposable
             command.Parameters.AddWithValue("$hash", hash);
             using var reader = command.ExecuteReader();
             if (!reader.Read()) return null;
-            return new TokenRecord(hash, reader.IsDBNull(0) ? null : reader.GetInt64(0));
+            return new TokenRecord(reader.IsDBNull(0) ? null : reader.GetInt64(0));
         }
     }
 
@@ -243,7 +243,7 @@ public sealed class RankingStore : IDisposable
         }
     }
 
-    /// <summary>表ごとの行の数 (テストと、ログに出す件数のため)</summary>
+    /// <summary>表ごとの行の数。テストが、消す処理と取り消しのあとの行の数を確かめるのに使う</summary>
     internal long Count(string table)
     {
         lock (gate) return Convert.ToInt64(Scalar($"SELECT count(*) FROM {table}"));

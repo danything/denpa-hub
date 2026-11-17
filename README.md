@@ -9,9 +9,9 @@ denpa は家ごとに置く録画サーバなので、家ごとにアドレス�
 | 機能                       | 説明                                                                                                  | 文書                                 |
 | -------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | ニコニコ OAuth の中継      | denpa の利用者が自分のニコニコのアカウントでニコニコ実況に書き込めるよう、認可・トークンの更新・実況の視聴の接続先を中継する | [docs/niconico.md](docs/niconico.md) |
-| 予約数ランキング | 参加した denpa の予約を放送ごとに数え、よく予約されている番組の順位を返す。hub の 1 段階目 (トークン・票・順位) まで。denpa からはまだ使っていない | [docs/ranking.md](docs/ranking.md) |
+| 予約数ランキング           | 参加した denpa の予約を放送ごとに数え、よく予約されている番組の順位を返す。hub の 1 段階目 (トークン・票・順位) まで。denpa からはまだ使っていない | [docs/ranking.md](docs/ranking.md)   |
 
-機能は `src/DenpaHub/Features/<名前>/` にまとめ、`Hub.cs` で足します。機能をまたぐもの (ログの出力レベル・応答のヘッダ・プロキシ・
+機能は `src/DenpaHub/Features/<名前>/` にまとめ、`Hub.cs` で足します。機能をまたぐもの (ログの出力レベル・応答のヘッダ・エラーの JSON・プロキシ・
 レート制限の断り方・`/healthz`) だけが `Hub.cs` にあります。
 
 ## 置く人が用意するもの
@@ -42,7 +42,7 @@ docker run --rm -p 8080:8080 \
   -e PUBLIC_ORIGIN=https://hub.example.jp \
   -e NICONICO_CLIENT_SECRET_FILE=/run/secrets/niconico-client-secret \
   ... \
-  ghcr.io/danything/denpa-hub:v0.1.0
+  ghcr.io/danything/denpa-hub:v0.4.0
 ```
 
 イメージは Native AOT の実行ファイル 1 個を distroless (`gcr.io/distroless/cc-debian13:nonroot`) に置いたもので、シェルもパッケージ管理も無く、root でも動きません。
@@ -67,10 +67,17 @@ main の `deploy/*.yaml` をそのまま同期します (Helm は使わない)�
 (シークレットに加えて、平文で書かないニコニコ固有のエンドポイント・スコープ)。実況の番組と視聴の接続先を引く URL・応答の形は `live.sops.yaml` に、
 秘密ではない局の対応表 (`NICONICO_LIVE_CHANNELS`) は `deployment.yaml` にあります。値は暗号化してあり、直すときは danything/gitops の
 `tools/t sops edit deploy/<ファイル>` で開きます (鍵は `.sops.yaml`)。
-予約数ランキングの印の鍵 `RANKING_MARK_KEY` ([docs/ranking.md](docs/ranking.md#データの持ち方)) も `secrets.sops.yaml` に入れます。
-`deployment.yaml` は `RANKING_DATA` を渡すので、鍵が無いと起動しません。ランキングの入ったイメージに上げる前に足します。
-新しいバージョンを出すときは `v*` のタグを push し、CI が出したイメージのタグと digest を `deployment.yaml` に書きます。
+予約数ランキングの印の鍵 `RANKING_MARK_KEY` ([docs/ranking.md](docs/ranking.md#データの持ち方)) も `secrets.sops.yaml` にあります。
+`deployment.yaml` は `RANKING_DATA` を渡すので、鍵を消すとランキングの入ったイメージは起動しません。
 ghcr.io のパッケージは公開なので、引くための資格情報は要りません。
+
+#### 新しいバージョンを出すとき
+
+1. `v*` のタグを push する。CI の `image` のジョブがイメージを ghcr.io に push する
+2. そのジョブの「Build (and push on tags)」が出力した digest (`docker buildx imagetools inspect ghcr.io/danything/denpa-hub:<タグ>` でも分かる) を、
+   タグと一緒に `deployment.yaml` の `image` に書き、PR にして main に入れる。ArgoCD が main を同期する
+3. 入れ替えは `Recreate` なので、古い Pod が止まってから新しい Pod が同じ PVC を開く。その間は応答しない
+4. ランキングの表の形を変えたバージョン (`RankingStore` の `SchemaVersion`) は、起動したときに中身を捨てて作り直す。denpa がトークンを取り直して送り直せば戻るので、移す手順は要らない
 
 ## 開発
 
@@ -87,6 +94,7 @@ docker build -t denpa-hub:local .
 ランキングは一時の場所に SQLite のファイルを作り、トークンの発行から票・順位・取り消し・消す処理までを確かめます。
 
 CI (`.github/workflows/ci.yml`) は PR と main で build・テスト・イメージの組み立てを回し、`v*` のタグを push したときだけイメージを ghcr.io に push します。
+PR には Claude が自動でレビューを付けます (`.github/workflows/claude-code-review.yml`。draft・bot・fork の PR と、main を取り込んだだけの push は見ない)。
 
 ## ライセンス
 

@@ -68,7 +68,7 @@ public static class RankingFeature
         var token = BearerToken(context);
         if (token is null || !Store(context).DeleteToken(token))
         {
-            await Json(context, StatusCodes.Status401Unauthorized, "invalid_token");
+            await Hub.ErrorAsync(context, StatusCodes.Status401Unauthorized, "invalid_token");
             return;
         }
         Log(context).LogInformation("ranking token revoked");
@@ -81,12 +81,12 @@ public static class RankingFeature
         var token = BearerToken(context);
         if (token is null || store.FindToken(token) is null)
         {
-            await Json(context, StatusCodes.Status401Unauthorized, "invalid_token");
+            await Hub.ErrorAsync(context, StatusCodes.Status401Unauthorized, "invalid_token");
             return;
         }
         if (!context.Request.HasJsonContentType())
         {
-            await Json(context, StatusCodes.Status400BadRequest, "invalid_request");
+            await Hub.ErrorAsync(context, StatusCodes.Status400BadRequest, "invalid_request");
             return;
         }
         var limit = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
@@ -108,13 +108,13 @@ public static class RankingFeature
         if (parsed is null)
         {
             Log(context).LogInformation("ranking votes rejected: {Error}", error);
-            await Json(context, StatusCodes.Status400BadRequest, error!);
+            await Hub.ErrorAsync(context, StatusCodes.Status400BadRequest, error!);
             return;
         }
 
         if (!store.ApplyVotes(token, parsed.Add, parsed.Remove, now))
         {
-            await Json(context, StatusCodes.Status401Unauthorized, "invalid_token");
+            await Hub.ErrorAsync(context, StatusCodes.Status401Unauthorized, "invalid_token");
             return;
         }
         var accepted = parsed.Add.Count + parsed.Remove.Count;
@@ -130,20 +130,20 @@ public static class RankingFeature
         var record = token is null ? null : Store(context).FindToken(token);
         if (record is null)
         {
-            await Json(context, StatusCodes.Status401Unauthorized, "invalid_token");
+            await Hub.ErrorAsync(context, StatusCodes.Status401Unauthorized, "invalid_token");
             return;
         }
         // 参加していない denpa には見せない。送ったのが 7 日より前なら、送ってから見直してもらう
         if (record.SentAt is not { } sentAt || DateTimeOffset.FromUnixTimeSeconds(sentAt) + ViewWindow < Now(context))
         {
-            await Json(context, StatusCodes.Status403Forbidden, "inactive");
+            await Hub.ErrorAsync(context, StatusCodes.Status403Forbidden, "inactive");
             return;
         }
         var limitText = context.Request.Query["limit"].ToString();
         var limit = DefaultLimit;
         if (limitText.Length > 0 && (!int.TryParse(limitText, out limit) || limit is < 1 or > RankingBoard.MaxEntries))
         {
-            await Json(context, StatusCodes.Status400BadRequest, "invalid_request");
+            await Hub.ErrorAsync(context, StatusCodes.Status400BadRequest, "invalid_request");
             return;
         }
         var body = context.RequestServices.GetRequiredService<RankingBoard>().Write(limit);
@@ -166,13 +166,6 @@ public static class RankingFeature
     static DateTimeOffset Now(HttpContext context) => context.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow();
 
     static ILogger Log(HttpContext context) => context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("DenpaHub.Ranking");
-
-    static Task Json(HttpContext context, int status, string error)
-    {
-        context.Response.StatusCode = status;
-        context.Response.ContentType = "application/json";
-        return context.Response.WriteAsync($$"""{"error":"{{error}}"}""");
-    }
 }
 
 /// <summary>

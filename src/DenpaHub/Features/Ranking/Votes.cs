@@ -14,7 +14,7 @@ public readonly record struct AiringId(int NetworkId, int ServiceId, int EventId
 /// <param name="StartAt">始まり (Unix 秒)</param>
 /// <param name="Duration">長さ (秒)</param>
 /// <param name="Genres">ジャンルの大分類。送られた順のまま、重なりだけを除く</param>
-/// <param name="Manual">手の予約なら true、ルールの予約なら false</param>
+/// <param name="Manual">手動の予約なら true、ルールの予約なら false</param>
 public sealed record AddVote(AiringId Id, long StartAt, int Duration, string Name, string ServiceName, IReadOnlyList<int> Genres, bool Manual)
 {
     public long EndAt => StartAt + Duration;

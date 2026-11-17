@@ -295,7 +295,7 @@ sealed class Harness : IAsyncDisposable
         return await CallbackAsync(callback, cookie);
     }
 
-    /// <summary>denpa のサーバが行う開封 (docs/niconico.md の「暗号の形」をそのまま書いたもの)</summary>
+    /// <summary>denpa のサーバがトークンを開く手順 (docs/niconico.md の「暗号の形」をそのまま書いたもの)</summary>
     public string Open(string result, string returnUrl = Return)
     {
         var data = Base64Url.DecodeFromChars(result);
