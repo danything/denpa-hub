@@ -399,6 +399,18 @@ public class RankingTests
     }
 
     [Test]
+    public async Task 認証のあとに取り消されたトークンの票は書かない()
+    {
+        await using var h = await RankingHarness.StartAsync();
+        var token = await h.IssueAsync();
+        h.Store.DeleteToken(token);
+        var vote = new AddVote(new AiringId(4, 211, 1), h.Time.Now.AddDays(1).ToUnixTimeSeconds(), 1800, "例の番組", "BS11イレブン", [7], Manual: true);
+        await Assert.That(h.Store.ApplyVotes(token, [vote], [], h.Time.Now)).IsFalse();
+        await Assert.That(h.Store.Count("marks")).IsEqualTo(0);
+        await Assert.That(h.Store.Count("airings")).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task 送らないまま_30_日たったトークンは消す()
     {
         await using var h = await RankingHarness.StartAsync();

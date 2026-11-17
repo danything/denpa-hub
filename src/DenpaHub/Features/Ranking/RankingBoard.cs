@@ -56,7 +56,7 @@ public sealed class RankingBoard(RankingStore store, TimeProvider time)
     {
         var snapshot = current;
         using var buffer = new MemoryStream();
-        // 番組名は日本語なので、 でエスケープせずに書く (応答は JSON だけで、HTML には埋めない)
+        // 番組名は日本語なので、`\uXXXX` にエスケープせずに書く (応答は JSON だけで、HTML には埋めない)
         using (var json = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
         {
             json.WriteStartObject();
@@ -104,6 +104,8 @@ public sealed class RankingWorker(RankingStore store, RankingBoard board, TimePr
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // 最初の回も起動 (Kestrel が受け始めるまで) を止めずに、後ろで動かす
+        await Task.Yield();
         var lastCleanup = DateTimeOffset.MinValue;
         using var timer = new PeriodicTimer(RebuildInterval);
         do

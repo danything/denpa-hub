@@ -112,7 +112,11 @@ public static class RankingFeature
             return;
         }
 
-        store.ApplyVotes(token, parsed.Add, parsed.Remove, now);
+        if (!store.ApplyVotes(token, parsed.Add, parsed.Remove, now))
+        {
+            await Json(context, StatusCodes.Status401Unauthorized, "invalid_token");
+            return;
+        }
         var accepted = parsed.Add.Count + parsed.Remove.Count;
         // 件数だけを書く。トークン・番組・接続元は書かない
         Log(context).LogInformation("ranking votes: add={Add} remove={Remove} rejected={Rejected}", parsed.Add.Count, parsed.Remove.Count, parsed.Rejected);

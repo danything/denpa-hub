@@ -135,23 +135,25 @@ public sealed class RankingStore : IDisposable
 
     /// <summary>
     /// 票を数えに入れ、最後に送った時刻を書き換える。1 トークン 1 放送 1 票で、同じ放送をもう一度送れば中身 (手かルールか・名前・時刻) を書き換える。
-    /// remove は、そのトークンの票が無い放送なら何もしない
+    /// remove は、そのトークンの票が無い放送なら何もしない。
+    /// トークンが無ければ (取り消された・消された) 何も書かずに false を返す。認証のあとに取り消しが割り込んでも、取り消したトークンの票を残さない
     /// </summary>
-    public void ApplyVotes(string token, IReadOnlyList<AddVote> adds, IReadOnlyList<AiringId> removes, DateTimeOffset now)
+    public bool ApplyVotes(string token, IReadOnlyList<AddVote> adds, IReadOnlyList<AiringId> removes, DateTimeOffset now)
     {
         lock (gate)
         {
             using var transaction = db.BeginTransaction();
-            var tx = new Votes(this, transaction, token);
-            foreach (var vote in adds) tx.Add(vote);
-            foreach (var id in removes) tx.Remove(id);
             using (var command = Command("UPDATE tokens SET sent_at = $now WHERE hash = $hash", transaction))
             {
                 command.Parameters.AddWithValue("$now", now.ToUnixTimeSeconds());
                 command.Parameters.AddWithValue("$hash", TokenHash(token));
-                command.ExecuteNonQuery();
+                if (command.ExecuteNonQuery() == 0) return false;
             }
+            var tx = new Votes(this, transaction, token);
+            foreach (var vote in adds) tx.Add(vote);
+            foreach (var id in removes) tx.Remove(id);
             transaction.Commit();
+            return true;
         }
     }
 

@@ -252,8 +252,8 @@ Content-Type: application/json
 - Deployment は 1 台のまま (`replicas: 1`)、入れ替えは `strategy: Recreate` にします (SQLite のファイルを 2 つのプロセスで開かないように)。
   ボリュームは Doa のクラスタのほかのアプリと同じく、ノードのローカルの PVC (`local-path`) にします。`readOnlyRootFilesystem` はそのままで、`/data` だけ書けるようにします (`deploy/deployment.yaml`)
 - バックアップは取りません。中身はどれも放送が終われば消すもので、失えば順位が空になり、denpa がトークンを取り直して送り直せば戻るためです (`401` のときの動き)
-- 確かめた: `Microsoft.Data.Sqlite` 11.0.0 (SQLitePCLRaw 3.0.5、SQLite 3.53.4) は、Native AOT で警告なしに組め、distroless の `cc` のイメージの上で読み書きできる。
-  組み込みの `libe_sqlite3.so` を実行ファイルの隣に置けば足りる (`Dockerfile`)。CI の「Smoke (ranking)」が、組んだイメージをルートを読み取り専用にして動かし、毎回確かめる
+- Native AOT で動くことを確かめました。`Microsoft.Data.Sqlite` 11.0.0 (SQLitePCLRaw 3.0.5、SQLite 3.53.4) は、Native AOT で警告なしに組め、distroless の `cc` のイメージの上で読み書きできます。
+  組み込みの `libe_sqlite3.so` を実行ファイルの隣に置けば足ります (`Dockerfile`)。CI の「Smoke (ranking)」が、組んだイメージをルートを読み取り専用にして動かし、毎回確かめます
 - SQLite の一時ファイルはメモリに置きます (`temp_store = MEMORY`)。書けるのが `/data` だけのためです。書き込みは WAL です
 - 1 つの接続をロックで順に使います。書き込みは 1 回の送信で数千行なので、待ちは短いとみています (推定)
 - PostgreSQL や Redis は選びません。1 台で済む量 (下の見積もり) で、別のサーバを立てて持つ手間に見合わないためです
