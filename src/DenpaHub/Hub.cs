@@ -1,4 +1,5 @@
 using DenpaHub.Features.Niconico;
+using DenpaHub.Features.Ranking;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -15,7 +16,8 @@ public static class Hub
         HubSettings hub,
         NiconicoSettings niconico,
         HttpMessageHandler? upstream = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        RankingSettings? ranking = null)
     {
         // ASP.NET Core と HttpClient のログは URL (OAuth のコードや state を含む) を書くので、警告より下は出さない
         builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
@@ -24,18 +26,11 @@ public static class Hub
 
         builder.Services.AddSingleton(hub);
         builder.Services.AddSingleton(time ?? TimeProvider.System);
-        // 各機能は名前つきの方針を足す。ここは断ったときの返事だけを決める
+        // 各機能は名前つきの方針を足すか、自分で数えて RejectAsync で断る。ここは断ったときの返事だけを決める
         builder.Services.AddRateLimiter(o =>
         {
             o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            o.OnRejected = async (context, ct) =>
-            {
-                var http = context.HttpContext;
-                http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("DenpaHub")
-                    .LogWarning("rate limited: {Path}", http.Request.Path.Value);
-                http.Response.ContentType = "text/plain; charset=utf-8";
-                await http.Response.WriteAsync("時間をおいてやり直してください。", ct);
-            };
+            o.OnRejected = (context, ct) => new ValueTask(RejectAsync(context.HttpContext, ct));
         });
         if (hub.TrustedProxies.Count > 0)
         {
@@ -51,6 +46,7 @@ public static class Hub
         }
 
         NiconicoFeature.Add(builder.Services, niconico, upstream);
+        RankingFeature.Add(builder.Services, ranking);
 
         var app = builder.Build();
         if (hub.TrustedProxies.Count > 0) app.UseForwardedHeaders();
@@ -68,7 +64,18 @@ public static class Hub
 
         app.MapGet("/healthz", (RequestDelegate)(context => context.Response.WriteAsync("ok")));
         NiconicoFeature.Map(app);
+        RankingFeature.Map(app);
         return app;
+    }
+
+    /// <summary>レート制限で断ったときの返事。名前つきの方針で断ったときも、機能が自分で数えて断ったときも同じにする</summary>
+    public static Task RejectAsync(HttpContext http, CancellationToken ct)
+    {
+        http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("DenpaHub")
+            .LogWarning("rate limited: {Path}", http.Request.Path.Value);
+        http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        http.Response.ContentType = "text/plain; charset=utf-8";
+        return http.Response.WriteAsync("時間をおいてやり直してください。", ct);
     }
 
     /// <summary>レート制限を分ける単位。TRUSTED_PROXIES があれば X-Forwarded-For から取った利用者のアドレス</summary>

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using DenpaHub;
 using DenpaHub.Features.Niconico;
+using DenpaHub.Features.Ranking;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -249,7 +250,8 @@ sealed class Harness : IAsyncDisposable
         builder.WebHost.UseTestServer();
         builder.Logging.ClearProviders();
         builder.Logging.AddProvider(logs);
-        var app = Hub.Build(builder, hubSettings, settings, provider.Handler, time);
+        var ranking = RankingSettings.Load(new DenpaHub.Env(name => env.GetValueOrDefault(name)));
+        var app = Hub.Build(builder, hubSettings, settings, provider.Handler, time, ranking);
         await app.StartAsync();
         var relay = app.GetTestServer().CreateClient();
         relay.BaseAddress = new Uri(RelayOrigin);

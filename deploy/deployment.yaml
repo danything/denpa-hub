@@ -1,7 +1,11 @@
-# denpa-hub 本体。状態を持たないので Deployment 1 つ (台数を増やしても同じ Secret で動く)。
+# denpa-hub 本体。予約数ランキングのデータ (SQLite のファイル 1 つ) を PVC に置くので、1 台だけで動かし、
+# 入れ替えは Recreate にする (同じファイルを 2 つのプロセスで開かないように。docs/ranking.md の「データの持ち方」)。
+# データのバックアップは取らない (どれも放送が終われば消すもので、失っても denpa が送り直せば戻る)。
 #
 # 設定のうちリポジトリに書いてよいものはここに、書かないもの (シークレットとニコニコ固有の値) は
 # SOPS で暗号化した secrets.sops.yaml・live.sops.yaml から sops-secrets-operator が作る Secret denpa-hub・denpa-hub-live にあり、envFrom で全部読む。
+# ランキングの印の鍵 RANKING_MARK_KEY も Secret denpa-hub に入れる。**RANKING_DATA があるのに鍵が無いと起動しないので、
+# ランキングの入ったイメージに上げる前に、secrets.sops.yaml に RANKING_MARK_KEY (openssl rand -base64 32) を足す。**
 # 値を書き換えると、Reloader の注釈で Pod が入れ替わる。
 #
 # イメージは v* のタグを push すると CI が ghcr.io に出す。入れ替えるときはタグと digest を両方書き換える。
@@ -19,6 +23,21 @@ spec:
       port: 8080
       targetPort: 8080
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: denpa-hub-data
+  namespace: denpa-hub
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # ほかのアプリと同じく、ノードのローカルに置く
+  storageClassName: local-path
+  resources:
+    requests:
+      # 見積もりは参加する家が 1 万で 150 MB 前後 (docs/ranking.md)
+      storage: 2Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,6 +47,8 @@ metadata:
     reloader.stakater.com/auto: "true"
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: denpa-hub
@@ -43,6 +64,8 @@ spec:
         # distroless の nonroot
         runAsUser: 65532
         runAsGroup: 65532
+        # PVC のデータの置き場を nonroot で書けるようにする
+        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -73,6 +96,9 @@ spec:
               value: >-
                 jk1=ch2646436,jk2=ch2646437,jk4=ch2646438,jk5=ch2646439,jk6=ch2646440,
                 jk7=ch2646441,jk8=ch2646442,jk9=ch2646485,jk101=ch2647992,jk211=ch2646846
+            # 予約数ランキングのデータ。鍵 (RANKING_MARK_KEY) は Secret denpa-hub から読む
+            - name: RANKING_DATA
+              value: /data/ranking.db
           envFrom:
             - secretRef:
                 name: denpa-hub
@@ -83,6 +109,10 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          volumeMounts:
+            # 書けるのはここだけ (ルートは読み取り専用のまま)
+            - name: data
+              mountPath: /data
           readinessProbe:
             httpGet:
               path: /healthz
@@ -99,3 +129,7 @@ spec:
               memory: 32Mi
             limits:
               memory: 128Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: denpa-hub-data

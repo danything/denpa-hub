@@ -1,7 +1,7 @@
 # denpa-hub
 
 各家庭の [denpa](https://github.com/danything/denpa) から使う、Doa が動かす共通のサーバです。
-いまの機能はニコニコ OAuth の中継です。
+いまの機能は、ニコニコ OAuth の中継と予約数ランキングです。
 
 denpa は家ごとに置く録画サーバなので、家ごとにアドレスが違い、サービスから受け取った秘密 (OAuth のクライアントのシークレットなど) も配れません。
 そうした「1 か所で持つ必要があるもの」をここに集めます。画面は持たず、エラーのときだけ短い文を返します。
@@ -9,7 +9,7 @@ denpa は家ごとに置く録画サーバなので、家ごとにアドレス�
 | 機能                       | 説明                                                                                                  | 文書                                 |
 | -------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | ニコニコ OAuth の中継      | denpa の利用者が自分のニコニコのアカウントでニコニコ実況に書き込めるよう、認可・トークンの更新・実況の視聴の接続先を中継する | [docs/niconico.md](docs/niconico.md) |
-| 予約数ランキング (設計中) | 参加した denpa の予約を番組ごとに数え、よく予約されている番組の順位を返す。まだ実装していない | [docs/ranking.md](docs/ranking.md) |
+| 予約数ランキング | 参加した denpa の予約を放送ごとに数え、よく予約されている番組の順位を返す。hub の 1 段階目 (トークン・票・順位) まで。denpa からはまだ使っていない | [docs/ranking.md](docs/ranking.md) |
 
 機能は `src/DenpaHub/Features/<名前>/` にまとめ、`Hub.cs` で足します。機能をまたぐもの (ログの出力レベル・応答のヘッダ・プロキシ・
 レート制限の断り方・`/healthz`) だけが `Hub.cs` にあります。
@@ -18,7 +18,8 @@ denpa は家ごとに置く録画サーバなので、家ごとにアドレス�
 
 - ドメインと TLS。例: `https://hub.example.jp`。TLS は手前のリバースプロキシ (Ingress など) で終端し、このサーバは 8080 番で http を受けます。
   HSTS もプロキシで付けます。
-- 置き場。コンテナ 1 つ (状態を持たないので、何台並べても同じ設定で動きます)。イメージは `ghcr.io/danything/denpa-hub:<タグ>`。
+- 置き場。コンテナ 1 つ。イメージは `ghcr.io/danything/denpa-hub:<タグ>`。ニコニコの中継は状態を持たないので、何台並べても同じ設定で動きます。
+  予約数ランキングを入れるときは、書けるボリュームを付けて 1 台だけで動かします ([docs/ranking.md](docs/ranking.md#データの持ち方))。
 - シークレットの渡し方。環境変数か、`<名前>_FILE` でファイルの場所を渡します (Kubernetes の Secret をファイルで載せるなど)。
   シークレットの値はリポジトリ・ログ・Issue のどこにも書きません。
 - 機能ごとに要るもの (ニコニコはリダイレクト URI の登録など) は、各機能の文書の「置く人が用意するもの」にあります。
@@ -56,7 +57,7 @@ main の `deploy/*.yaml` をそのまま同期します (Helm は使わない)�
 | --------------------- | ------------------------------------------------------------------------------------------------- |
 | `argocd.yaml`         | ApplicationSet が読む、この置き場の設定 (namespace `denpa-hub`)                                   |
 | `namespace.yaml`      | PSA を restricted にするラベル                                                                    |
-| `deployment.yaml`     | Deployment と Service。`PUBLIC_ORIGIN`・`TRUSTED_PROXIES` とイメージ (タグと digest) はここ        |
+| `deployment.yaml`     | Deployment・Service・ランキングのデータの PVC。`PUBLIC_ORIGIN`・`TRUSTED_PROXIES`・`RANKING_DATA` とイメージ (タグと digest) はここ |
 | `secrets.sops.yaml`   | SopsSecret。SOPS で暗号化した値から、sops-secrets-operator が Secret `denpa-hub` を作る |
 | `live.sops.yaml`      | SopsSecret。実況の番組と視聴の接続先を引く設定の Secret `denpa-hub-live`                    |
 | `httproute.yaml`      | Gateway `kube-system/doany` の `https` のリスナーに `dh.doany.io` を載せる (Cloudflare を通す)    |
@@ -66,6 +67,8 @@ main の `deploy/*.yaml` をそのまま同期します (Helm は使わない)�
 (シークレットに加えて、平文で書かないニコニコ固有のエンドポイント・スコープ)。実況の番組と視聴の接続先を引く URL・応答の形は `live.sops.yaml` に、
 秘密ではない局の対応表 (`NICONICO_LIVE_CHANNELS`) は `deployment.yaml` にあります。値は暗号化してあり、直すときは danything/gitops の
 `tools/t sops edit deploy/<ファイル>` で開きます (鍵は `.sops.yaml`)。
+予約数ランキングの印の鍵 `RANKING_MARK_KEY` ([docs/ranking.md](docs/ranking.md#データの持ち方)) も `secrets.sops.yaml` に入れます。
+`deployment.yaml` は `RANKING_DATA` を渡すので、鍵が無いと起動しません。ランキングの入ったイメージに上げる前に足します。
 新しいバージョンを出すときは `v*` のタグを push し、CI が出したイメージのタグと digest を `deployment.yaml` に書きます。
 ghcr.io のパッケージは公開なので、引くための資格情報は要りません。
 
@@ -81,6 +84,7 @@ docker build -t denpa-hub:local .
 
 テストは偽のニコニコ (OAuth 2.0 の認可サーバと、パスも応答の形も偽物の実況の API) を同じプロセスに立て、連携の全体 (認可 → 同意 → コールバック → トークンの交換 → 暗号化して返す) と、
 更新・実況の接続先の中継・戻り先の検査・ログに秘密が出ないことを確かめます。
+ランキングは一時の場所に SQLite のファイルを作り、トークンの発行から票・順位・取り消し・消す処理までを確かめます。
 
 CI (`.github/workflows/ci.yml`) は PR と main で build・テスト・イメージの組み立てを回し、`v*` のタグを push したときだけイメージを ghcr.io に push します。
 
