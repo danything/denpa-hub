@@ -208,19 +208,19 @@ public static class NiconicoFeature
         var form = await ReadForm(context);
         if (form is null)
         {
-            await Json(context, StatusCodes.Status400BadRequest, "invalid_request");
+            await Hub.ErrorAsync(context, StatusCodes.Status400BadRequest, "invalid_request");
             return;
         }
         // コードとの交換はコールバックの中だけで行う。ここで受けるのは更新だけ
         if (form["grant_type"] != "refresh_token")
         {
-            await Json(context, StatusCodes.Status400BadRequest, "unsupported_grant_type");
+            await Hub.ErrorAsync(context, StatusCodes.Status400BadRequest, "unsupported_grant_type");
             return;
         }
         var refreshToken = form["refresh_token"].ToString();
         if (refreshToken.Length == 0)
         {
-            await Json(context, StatusCodes.Status400BadRequest, "invalid_request");
+            await Hub.ErrorAsync(context, StatusCodes.Status400BadRequest, "invalid_request");
             return;
         }
         List<KeyValuePair<string, string>> parameters = [new("grant_type", "refresh_token"), new("refresh_token", refreshToken)];
@@ -235,7 +235,7 @@ public static class NiconicoFeature
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
             Log(context).LogWarning("token: upstream unreachable ({Type})", e.GetType().Name);
-            await Json(context, StatusCodes.Status502BadGateway, "temporarily_unavailable");
+            await Hub.ErrorAsync(context, StatusCodes.Status502BadGateway, "temporarily_unavailable");
             return;
         }
         Log(context).LogInformation("token: upstream {Status}", (int)response.Status);
@@ -335,12 +335,5 @@ public static class NiconicoFeature
         context.Response.StatusCode = status;
         context.Response.ContentType = "text/plain; charset=utf-8";
         return context.Response.WriteAsync(message);
-    }
-
-    internal static Task Json(HttpContext context, int status, string error)
-    {
-        context.Response.StatusCode = status;
-        context.Response.ContentType = "application/json";
-        return context.Response.WriteAsync($$"""{"error":"{{error}}"}""");
     }
 }

@@ -91,7 +91,7 @@ public static class LiveFeature
         if (token is null)
         {
             log.LogInformation("live watch rejected: token");
-            await NiconicoFeature.Json(context, StatusCodes.Status401Unauthorized, "invalid_token");
+            await Hub.ErrorAsync(context, StatusCodes.Status401Unauthorized, "invalid_token");
             return;
         }
         var form = await NiconicoFeature.ReadForm(context);
@@ -99,13 +99,13 @@ public static class LiveFeature
         if (form is null || !IsId(user))
         {
             log.LogInformation("live watch rejected: request");
-            await NiconicoFeature.Json(context, StatusCodes.Status400BadRequest, "invalid_request");
+            await Hub.ErrorAsync(context, StatusCodes.Status400BadRequest, "invalid_request");
             return;
         }
         if (!settings.Channels.TryGetValue(form["channel"].ToString(), out var channel))
         {
             log.LogInformation("live watch rejected: unknown channel");
-            await NiconicoFeature.Json(context, StatusCodes.Status400BadRequest, "unknown_channel");
+            await Hub.ErrorAsync(context, StatusCodes.Status400BadRequest, "unknown_channel");
             return;
         }
 
@@ -125,7 +125,7 @@ public static class LiveFeature
             if (programId is null || !IsId(programId))
             {
                 log.LogWarning("live watch: program response without a usable program id (version skew?)");
-                await NiconicoFeature.Json(context, StatusCodes.Status502BadGateway, "temporarily_unavailable");
+                await Hub.ErrorAsync(context, StatusCodes.Status502BadGateway, "temporarily_unavailable");
                 return;
             }
 
@@ -142,7 +142,7 @@ public static class LiveFeature
             if (url is null)
             {
                 log.LogWarning("live watch: watch response without a wss url (version skew?)");
-                await NiconicoFeature.Json(context, StatusCodes.Status502BadGateway, "temporarily_unavailable");
+                await Hub.ErrorAsync(context, StatusCodes.Status502BadGateway, "temporarily_unavailable");
                 return;
             }
 
@@ -152,7 +152,7 @@ public static class LiveFeature
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
             log.LogWarning("live watch: upstream unreachable ({Type})", e.GetType().Name);
-            await NiconicoFeature.Json(context, StatusCodes.Status502BadGateway, "temporarily_unavailable");
+            await Hub.ErrorAsync(context, StatusCodes.Status502BadGateway, "temporarily_unavailable");
         }
     }
 
@@ -172,7 +172,7 @@ public static class LiveFeature
         var log = NiconicoFeature.Log(context);
         if (code == StatusCodes.Status502BadGateway) log.LogWarning("live watch: {Step} upstream {Status}", step, (int)status);
         else log.LogInformation("live watch: {Step} upstream {Status}", step, (int)status);
-        return NiconicoFeature.Json(context, code, error);
+        return Hub.ErrorAsync(context, code, error);
     }
 
     /// <summary>

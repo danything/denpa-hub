@@ -291,9 +291,9 @@ public class RankingTests
     {
         await using var h = await RankingHarness.StartAsync();
         var start = h.Time.Now.AddDays(1);
-        // 手 7 = 7 → 5
+        // 手動 7 = 7 → 5
         await h.VoteManyAsync(7, RankingHarness.Airing(1, start));
-        // 手 5 + ルール 10 = 10
+        // 手動 5 + ルール 10 = 10
         await h.VoteManyAsync(5, RankingHarness.Airing(2, start, kind: "manual"));
         var tokens = await h.VoteManyAsync(10, RankingHarness.Airing(2, start, kind: "rule"));
         // ルール 8 = 4 → 0 なので出さない
@@ -303,7 +303,7 @@ public class RankingTests
         await Assert.That(string.Join(" ", entries.Select(e => $"{e.GetProperty("rank")}:{e.GetProperty("votes")}:{e.GetProperty("airings")[0].GetProperty("event_id")}")))
             .IsEqualTo("1:10:2 2:5:1");
 
-        // ルールの予約を手の予約に変えると数え直す (手 5 + 手 1 + ルール 9 = 10.5 → 10)。トークンの数は変わらない
+        // ルールの予約を手動の予約に変えると数え直す (手動 5 + 手動 1 + ルール 9 = 10.5 → 10)。トークンの数は変わらない
         using (var changed = await h.SendAsync(tokens[0], [RankingHarness.Airing(2, start, kind: "manual")])) await Assert.That(changed.StatusCode).IsEqualTo(HttpStatusCode.OK);
         var after = Entries(await h.RankingAsync(tokens[0]));
         await Assert.That(after[0].GetProperty("votes").GetInt32()).IsEqualTo(10);
