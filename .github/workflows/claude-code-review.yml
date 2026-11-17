@@ -1,0 +1,65 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  claude-review:
+    # Draft の PR と bot (renovate など) の PR は見ない。fork からの PR も、secrets が渡らないので見ない
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !endsWith(github.event.pull_request.user.login, '[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # main を取り込んだだけの push ではレビューし直さない。中身はもう見ている。ジョブは成功で終わる
+      - name: Skip main merges
+        id: merge
+        if: github.event.action == 'synchronize'
+        run: |
+          parents=$(git log -1 --pretty=%P | wc -w)
+          subject=$(git log -1 --pretty=%s)
+          if [ "$parents" -gt 1 ] && echo "$subject" | grep -qE "^Merge (branch 'main'|remote-tracking branch 'origin/main'|branch 'main' of)"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Claude Code Review
+        if: steps.merge.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@cc98b3ae241b0fcfb6a42a2690751afffecb4452 # v1.0.278
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            このプルリクエストをレビューしてください。回答は日本語で書いてください。
+
+            観点:
+            1. 不具合: ロジックの誤り、null や境界値、エラーの扱いの漏れ、競合状態
+            2. セキュリティ: 入力値の検証、認証・認可、シークレットの混入、ログに秘密を写していないか
+            3. 設計: 既存コードとの一貫性、重複、過剰な複雑さ
+            4. テスト: 変更に対するテストの有無と質
+            5. 文章: docs・コメント・応答の文言が、denpa の書き方の決まり (danything/denpa の docs/writing.md。`gh api repos/danything/denpa/contents/docs/writing.md -H "Accept: application/vnd.github.raw"` で読める) に合っているか
+
+            進め方:
+            - リポジトリの規約 (README / docs / 周辺コード) に従うこと
+            - 具体的な問題は該当行にインラインコメントを付けること
+            - 全体的な所感は 1 つのトップレベルコメントにまとめること
+            - 確信が持てない指摘は「要確認」と明記すること
+            - 問題が無ければ簡潔に問題無しと述べること。無理に指摘を作らないこと
+            - スタイルの好みだけの指摘や、変更されていない箇所の指摘はしないこと (書き方の決まりに反するものは指摘してよい)
+
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api repos/danything/denpa/contents/docs/writing.md:*)"
