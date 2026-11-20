@@ -7,7 +7,7 @@ namespace DenpaHub.Features.Ranking;
 public readonly record struct AiringId(int NetworkId, int ServiceId, int EventId)
 {
     /// <summary>地上波・BS・CS の original_network_id (ARIB TR-B14・TR-B15)。BS は 4、CS は 6・7、地上波は 0x7880〜0x7FE8</summary>
-    public static bool IsCountedNetwork(int networkId) => networkId is 4 or 6 or 7 or (>= 0x7880 and <= 0x7FE8);
+    public static bool IsCountedNetwork(int networkId) => networkId is 4 or 6 or 7 || Terrestrial.IsTerrestrial(networkId);
 }
 
 /// <summary>送られた予約 1 件 (<c>add</c> の 1 つ)</summary>

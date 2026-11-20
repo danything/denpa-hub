@@ -5,7 +5,8 @@ namespace DenpaHub.Features.Ranking;
 
 /// <summary>
 /// メモリに置く順位。10 分ごとに作り直し、全部のトークンに同じものを返す。
-/// 決まり (5 トークン未満は出さない・ルールの予約の重み・5 の倍数への切り下げ) は docs/ranking.md の「少ない人数の番組は出さない」と「ルールの予約の重み」
+/// 決まり (5 トークン未満は出さない・ルールの予約の重み・5 の倍数への切り下げ) は docs/ranking.md の「少ない人数の番組は出さない」と「ルールの予約の重み」。
+/// 地上波の地域をまたぐ放送は、同じ番組を 1 つにまとめてから数える (<see cref="Grouping"/>)
 /// </summary>
 public sealed class RankingBoard(RankingStore store, TimeProvider time)
 {
@@ -22,31 +23,43 @@ public sealed class RankingBoard(RankingStore store, TimeProvider time)
 
     sealed record Snapshot(DateTimeOffset GeneratedAt, IReadOnlyList<Entry> Entries);
 
-    public sealed record Entry(int Rank, int Votes, Candidate Airing);
+    /// <summary>順位の 1 件。<paramref name="Lead"/> は名前とジャンルを出す放送 (まとめた中で票を入れたトークンのいちばん多いもの)</summary>
+    /// <param name="Airings">まとめた放送の全部。始まりの順</param>
+    /// <param name="Affiliation">地上波の系列の名前 (「TBS 系」)。無ければ null</param>
+    public sealed record Entry(int Rank, int Votes, Candidate Lead, IReadOnlyList<Candidate> Airings, string? Affiliation);
 
     Snapshot current = new(DateTimeOffset.MinValue, []);
 
     public IReadOnlyList<Entry> Entries => current.Entries;
 
-    /// <summary>順位を作り直す。始まった番組は入れない</summary>
+    /// <summary>順位を作り直す。始まった放送は入れない</summary>
     public void Rebuild()
     {
-        var now = time.GetUtcNow();
-        var entries = store.ReadCandidates(MinTokens)
-            .Where(c => c.StartAt > now.ToUnixTimeSeconds())
-            .Select(c => (Votes: Round(c.Manual + c.Rule * RuleWeight), Airing: c))
+        var now = time.GetUtcNow().ToUnixTimeSeconds();
+        // 地上波は 1 つの放送ではトークンが足りなくても、地域をまたいでまとめると足りることがあるので、全部を読んでからまとめる
+        var groups = Grouping.Group(store.ReadCandidates(MinTokens).Where(c => c.StartAt > now));
+        var entries = groups
+            // 数えるのはトークンの数 (重みを掛ける前)。まとめた放送の合計
+            .Where(g => g.Sum(c => c.Manual + c.Rule) >= MinTokens)
+            .Select(g =>
+            {
+                var airings = g.OrderBy(c => c.StartAt).ThenBy(c => Terrestrial.RegionOf(c.Id) ?? 0).ThenBy(c => c.Id.ServiceId).ThenBy(c => c.Id.EventId).ToList();
+                var lead = airings.OrderByDescending(c => c.Manual + c.Rule).First();
+                var affiliation = Terrestrial.AffiliationOf(lead.Id) is { } a ? Terrestrial.AffiliationNames[a] : null;
+                return (Votes: Round(g.Sum(c => c.Manual) + g.Sum(c => c.Rule) * RuleWeight), Lead: lead, Airings: airings, Affiliation: affiliation);
+            })
             // 切り下げて 0 になる番組 (ルールの予約だけで 5〜9 トークン) は出さない
             .Where(e => e.Votes > 0)
             // 切り下げた数で並べ、同じ数の中は放送の順にする。切り下げる前の数で並べると、並びから 1 票ずつの差が見えるため
             .OrderByDescending(e => e.Votes)
-            .ThenBy(e => e.Airing.StartAt)
-            .ThenBy(e => e.Airing.Id.NetworkId)
-            .ThenBy(e => e.Airing.Id.ServiceId)
-            .ThenBy(e => e.Airing.Id.EventId)
+            .ThenBy(e => e.Airings[0].StartAt)
+            .ThenBy(e => e.Airings[0].Id.NetworkId)
+            .ThenBy(e => e.Airings[0].Id.ServiceId)
+            .ThenBy(e => e.Airings[0].Id.EventId)
             .Take(MaxEntries)
-            .Select((e, i) => new Entry(i + 1, e.Votes, e.Airing))
+            .Select((e, i) => new Entry(i + 1, e.Votes, e.Lead, e.Airings, e.Affiliation))
             .ToList();
-        current = new Snapshot(now, entries);
+        current = new Snapshot(time.GetUtcNow(), entries);
     }
 
     static int Round(double weighted) => (int)Math.Floor(weighted / Step) * Step;
@@ -65,25 +78,26 @@ public sealed class RankingBoard(RankingStore store, TimeProvider time)
             json.WriteStartArray("entries");
             foreach (var entry in snapshot.Entries.Take(limit))
             {
-                var airing = entry.Airing;
                 json.WriteStartObject();
                 json.WriteNumber("rank", entry.Rank);
                 json.WriteNumber("votes", entry.Votes);
-                json.WriteString("name", airing.Name);
+                json.WriteString("name", entry.Lead.Name);
                 json.WriteStartArray("genres");
-                foreach (var genre in airing.Genres) json.WriteNumberValue(genre);
+                foreach (var genre in entry.Lead.Genres) json.WriteNumberValue(genre);
                 json.WriteEndArray();
-                // 系列と地域は地域をまたいでまとめるときに足す (5 段階目)。それまでは null
-                json.WriteNull("affiliation");
+                json.WriteString("affiliation", entry.Affiliation);
                 json.WriteStartArray("airings");
-                json.WriteStartObject();
-                json.WriteNumber("network_id", airing.Id.NetworkId);
-                json.WriteNumber("service_id", airing.Id.ServiceId);
-                json.WriteNumber("event_id", airing.Id.EventId);
-                json.WriteString("start_at", Iso(DateTimeOffset.FromUnixTimeSeconds(airing.StartAt)));
-                json.WriteString("service_name", airing.ServiceName);
-                json.WriteNull("region");
-                json.WriteEndObject();
+                foreach (var airing in entry.Airings)
+                {
+                    json.WriteStartObject();
+                    json.WriteNumber("network_id", airing.Id.NetworkId);
+                    json.WriteNumber("service_id", airing.Id.ServiceId);
+                    json.WriteNumber("event_id", airing.Id.EventId);
+                    json.WriteString("start_at", Iso(DateTimeOffset.FromUnixTimeSeconds(airing.StartAt)));
+                    json.WriteString("service_name", airing.ServiceName);
+                    json.WriteString("region", Terrestrial.RegionName(airing.Id));
+                    json.WriteEndObject();
+                }
                 json.WriteEndArray();
                 json.WriteEndObject();
             }
