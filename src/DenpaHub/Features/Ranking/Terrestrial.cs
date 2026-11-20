@@ -367,11 +367,8 @@ public static class Terrestrial
         [62] = "沖縄",
     };
 
-    /// <summary>地域の識別。地上波でなければ null</summary>
-    public static int? RegionOf(AiringId id) => IsTerrestrial(id.NetworkId) ? id.ServiceId >> 10 : null;
-
     /// <summary>地域の名前。地上波でない・表に無い地域なら null</summary>
-    public static string? RegionName(AiringId id) => RegionOf(id) is { } region && Regions.TryGetValue(region, out var name) ? name : null;
+    public static string? RegionName(AiringId id) => IsTerrestrial(id.NetworkId) && Regions.TryGetValue(id.ServiceId >> 10, out var name) ? name : null;
 
     /// <summary>系列 (実況のチャンネルの番号)。地上波でない・独立局・表に無い局なら null</summary>
     public static int? AffiliationOf(AiringId id) =>

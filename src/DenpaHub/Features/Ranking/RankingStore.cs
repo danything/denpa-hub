@@ -158,58 +158,59 @@ public sealed class RankingStore : IDisposable
     }
 
     /// <summary>
-    /// 票を入れたトークンが <paramref name="minTokens"/> 以上の放送と、地上波の放送の全部 (地域をまたいでまとめてから数えるため)。
+    /// まだ始まっていない放送のうち、票を入れたトークンが <paramref name="minTokens"/> 以上のものと、地上波のものの全部 (地域をまたいでまとめてから数えるため)。
     /// 名前・局名・ジャンル・時刻は、それぞれ票の多いもの
     /// </summary>
-    public IReadOnlyList<Candidate> ReadCandidates(int minTokens)
+    public List<Candidate> ReadCandidates(int minTokens, DateTimeOffset now)
     {
+        var seconds = now.ToUnixTimeSeconds();
+        var candidates = new List<Candidate>();
+        AiringId? id = null;
+        (int Manual, int Rule) count = default;
+        var best = new (string? Value, long Votes)[Fields.Length];
         lock (gate)
         {
-            var counts = new Dictionary<AiringId, (int Manual, int Rule)>();
-            using (var command = Command("SELECT network_id, service_id, event_id, manual, rule FROM airings WHERE manual + rule >= $min OR network_id BETWEEN $terrestrialFrom AND $terrestrialTo"))
+            // 放送の順に読み、放送が替わるたびに 1 つ作る。終わった放送は始まりを読むまでもなく外す
+            using var command = Command("""
+                SELECT a.network_id, a.service_id, a.event_id, a.manual, a.rule, l.field, l.value, l.votes
+                FROM airings a JOIN labels l USING (network_id, service_id, event_id)
+                WHERE a.end_at > $now AND (a.manual + a.rule >= $min OR a.network_id BETWEEN $terrestrialFrom AND $terrestrialTo)
+                ORDER BY a.network_id, a.service_id, a.event_id
+                """);
+            command.Parameters.AddWithValue("$now", seconds);
+            command.Parameters.AddWithValue("$min", minTokens);
+            command.Parameters.AddWithValue("$terrestrialFrom", Terrestrial.FirstNetwork);
+            command.Parameters.AddWithValue("$terrestrialTo", Terrestrial.LastNetwork);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
             {
-                command.Parameters.AddWithValue("$min", minTokens);
-                command.Parameters.AddWithValue("$terrestrialFrom", Terrestrial.FirstNetwork);
-                command.Parameters.AddWithValue("$terrestrialTo", Terrestrial.LastNetwork);
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
-                    counts[new AiringId(reader.GetInt32(0), reader.GetInt32(1), reader.GetInt32(2))] = (reader.GetInt32(3), reader.GetInt32(4));
-            }
-
-            // 放送と欄ごとに、票の多いもの。同じ数なら文字の順で先のもの (毎回同じものを選ぶため)
-            var best = new Dictionary<(AiringId, Field), (string Value, long Votes)>();
-            using (var command = Command("""
-                SELECT l.network_id, l.service_id, l.event_id, l.field, l.value, l.votes
-                FROM labels l JOIN airings a USING (network_id, service_id, event_id)
-                WHERE a.manual + a.rule >= $min OR a.network_id BETWEEN $terrestrialFrom AND $terrestrialTo
-                """))
-            {
-                command.Parameters.AddWithValue("$min", minTokens);
-                command.Parameters.AddWithValue("$terrestrialFrom", Terrestrial.FirstNetwork);
-                command.Parameters.AddWithValue("$terrestrialTo", Terrestrial.LastNetwork);
-                using var reader = command.ExecuteReader();
-                while (reader.Read())
+                var next = new AiringId(reader.GetInt32(0), reader.GetInt32(1), reader.GetInt32(2));
+                if (next != id)
                 {
-                    var slot = (new AiringId(reader.GetInt32(0), reader.GetInt32(1), reader.GetInt32(2)), (Field)reader.GetInt32(3));
-                    var value = reader.GetString(4);
-                    var votes = reader.GetInt64(5);
-                    if (!best.TryGetValue(slot, out var current) || votes > current.Votes
-                        || (votes == current.Votes && string.CompareOrdinal(value, current.Value) < 0))
-                        best[slot] = (value, votes);
+                    Flush();
+                    id = next;
+                    count = (reader.GetInt32(3), reader.GetInt32(4));
+                    Array.Clear(best);
                 }
+                // 欄ごとに票の多いもの。同じ数なら文字の順で先のもの (毎回同じものを選ぶため)
+                var field = reader.GetInt32(5);
+                var value = reader.GetString(6);
+                var votes = reader.GetInt64(7);
+                ref var current = ref best[field];
+                if (current.Value is null || votes > current.Votes || (votes == current.Votes && string.CompareOrdinal(value, current.Value) < 0))
+                    current = (value, votes);
             }
+            Flush();
+        }
+        return candidates;
 
-            var candidates = new List<Candidate>(counts.Count);
-            foreach (var (id, count) in counts)
-            {
-                if (!best.TryGetValue((id, Field.Name), out var name)
-                    || !best.TryGetValue((id, Field.ServiceName), out var service)
-                    || !best.TryGetValue((id, Field.Time), out var time))
-                    continue;
-                best.TryGetValue((id, Field.Genres), out var genres);
-                candidates.Add(new Candidate(id, count.Manual, count.Rule, name.Value, service.Value, ParseGenres(genres.Value), ParseTime(time.Value).StartAt));
-            }
-            return candidates;
+        void Flush()
+        {
+            if (id is not { } airing) return;
+            if (best[(int)Field.Name].Value is not { } name || best[(int)Field.ServiceName].Value is not { } service || best[(int)Field.Time].Value is not { } time) return;
+            var startAt = ParseTime(time).StartAt;
+            if (startAt <= seconds) return;
+            candidates.Add(new Candidate(airing, count.Manual, count.Rule, name, service, ParseGenres(best[(int)Field.Genres].Value), startAt));
         }
     }
 

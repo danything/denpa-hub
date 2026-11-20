@@ -35,16 +35,16 @@ public sealed class RankingBoard(RankingStore store, TimeProvider time)
     /// <summary>順位を作り直す。始まった放送は入れない</summary>
     public void Rebuild()
     {
-        var now = time.GetUtcNow().ToUnixTimeSeconds();
+        var now = time.GetUtcNow();
         // 地上波は 1 つの放送ではトークンが足りなくても、地域をまたいでまとめると足りることがあるので、全部を読んでからまとめる
-        var groups = Grouping.Group(store.ReadCandidates(MinTokens).Where(c => c.StartAt > now));
+        var groups = Grouping.Group(store.ReadCandidates(MinTokens, now));
         var entries = groups
             // 数えるのはトークンの数 (重みを掛ける前)。まとめた放送の合計
             .Where(g => g.Sum(c => c.Manual + c.Rule) >= MinTokens)
             .Select(g =>
             {
-                var airings = g.OrderBy(c => c.StartAt).ThenBy(c => Terrestrial.RegionOf(c.Id) ?? 0).ThenBy(c => c.Id.ServiceId).ThenBy(c => c.Id.EventId).ToList();
-                var lead = airings.OrderByDescending(c => c.Manual + c.Rule).First();
+                var airings = g.OrderBy(c => c.StartAt).ThenBy(c => c.Id.ServiceId).ThenBy(c => c.Id.EventId).ToList();
+                var lead = airings.MaxBy(c => c.Manual + c.Rule)!;
                 var affiliation = Terrestrial.AffiliationOf(lead.Id) is { } a ? Terrestrial.AffiliationNames[a] : null;
                 return (Votes: Round(g.Sum(c => c.Manual) + g.Sum(c => c.Rule) * RuleWeight), Lead: lead, Airings: airings, Affiliation: affiliation);
             })
@@ -59,7 +59,7 @@ public sealed class RankingBoard(RankingStore store, TimeProvider time)
             .Take(MaxEntries)
             .Select((e, i) => new Entry(i + 1, e.Votes, e.Lead, e.Airings, e.Affiliation))
             .ToList();
-        current = new Snapshot(time.GetUtcNow(), entries);
+        current = new Snapshot(now, entries);
     }
 
     static int Round(double weighted) => (int)Math.Floor(weighted / Step) * Step;
