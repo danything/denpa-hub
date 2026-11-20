@@ -8,7 +8,7 @@ namespace DenpaHub.Features.Ranking;
 
 /// <summary>
 /// 予約数ランキング。参加した denpa の予約を放送ごとに数え、よく予約されている番組の順位を、送ったトークンだけに返す。
-/// 契約は docs/ranking.md。1 段階目なので、地上波を地域をまたいでまとめることはせず、順位は放送ごとのまま
+/// 契約は docs/ranking.md。地上波の同時ネットは、地域をまたいで 1 つの番組にまとめて数える (<see cref="Grouping"/>)
 /// </summary>
 public static class RankingFeature
 {

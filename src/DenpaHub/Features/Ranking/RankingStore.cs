@@ -157,15 +157,20 @@ public sealed class RankingStore : IDisposable
         }
     }
 
-    /// <summary>票を入れたトークンが <paramref name="minTokens"/> 以上の放送。名前・局名・ジャンル・時刻は、それぞれ票の多いもの</summary>
+    /// <summary>
+    /// 票を入れたトークンが <paramref name="minTokens"/> 以上の放送と、地上波の放送の全部 (地域をまたいでまとめてから数えるため)。
+    /// 名前・局名・ジャンル・時刻は、それぞれ票の多いもの
+    /// </summary>
     public IReadOnlyList<Candidate> ReadCandidates(int minTokens)
     {
         lock (gate)
         {
             var counts = new Dictionary<AiringId, (int Manual, int Rule)>();
-            using (var command = Command("SELECT network_id, service_id, event_id, manual, rule FROM airings WHERE manual + rule >= $min"))
+            using (var command = Command("SELECT network_id, service_id, event_id, manual, rule FROM airings WHERE manual + rule >= $min OR network_id BETWEEN $terrestrialFrom AND $terrestrialTo"))
             {
                 command.Parameters.AddWithValue("$min", minTokens);
+                command.Parameters.AddWithValue("$terrestrialFrom", Terrestrial.FirstNetwork);
+                command.Parameters.AddWithValue("$terrestrialTo", Terrestrial.LastNetwork);
                 using var reader = command.ExecuteReader();
                 while (reader.Read())
                     counts[new AiringId(reader.GetInt32(0), reader.GetInt32(1), reader.GetInt32(2))] = (reader.GetInt32(3), reader.GetInt32(4));
@@ -176,10 +181,12 @@ public sealed class RankingStore : IDisposable
             using (var command = Command("""
                 SELECT l.network_id, l.service_id, l.event_id, l.field, l.value, l.votes
                 FROM labels l JOIN airings a USING (network_id, service_id, event_id)
-                WHERE a.manual + a.rule >= $min
+                WHERE a.manual + a.rule >= $min OR a.network_id BETWEEN $terrestrialFrom AND $terrestrialTo
                 """))
             {
                 command.Parameters.AddWithValue("$min", minTokens);
+                command.Parameters.AddWithValue("$terrestrialFrom", Terrestrial.FirstNetwork);
+                command.Parameters.AddWithValue("$terrestrialTo", Terrestrial.LastNetwork);
                 using var reader = command.ExecuteReader();
                 while (reader.Read())
                 {
