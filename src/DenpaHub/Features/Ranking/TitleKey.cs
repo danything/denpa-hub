@@ -116,7 +116,12 @@ public static partial class TitleKey
     static string StripPrefix(string text)
     {
         foreach (var station in Stations)
-            if (text.StartsWith(station, StringComparison.Ordinal)) return text[station.Length..];
+        {
+            if (!text.StartsWith(station, StringComparison.Ordinal)) continue;
+            // 英字で終わる略称は、続きが英数字なら別の語の先頭なので落とさない (`tos` と `toshiba…`、`rab` と `rabbit…`)
+            if (char.IsAsciiLetterOrDigit(station[^1]) && text.Length > station.Length && char.IsAsciiLetterOrDigit(text[station.Length])) continue;
+            return text[station.Length..];
+        }
         if (LeadingLabel().Match(text) is { Success: true } label) return text[label.Length..];
         if (LeadingQuote().Match(text) is { Success: true } quote) return text[quote.Length..];
         return text;

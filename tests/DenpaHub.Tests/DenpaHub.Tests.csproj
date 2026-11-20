@@ -9,7 +9,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
         <IsPackable>false</IsPackable>
-        <!-- 本体と同じく、ICU を使わない (番組名の NFKC などが本番と同じに動くことを確かめるため) -->
+        <!-- 本体と同じく、ICU を使わない (番組名の全角を半角に寄せる処理などが、ICU の無い本番と同じに動くことを確かめるため) -->
         <InvariantGlobalization>true</InvariantGlobalization>
     </PropertyGroup>
 

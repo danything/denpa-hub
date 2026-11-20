@@ -53,6 +53,9 @@ public class GroupingTests
         // 名前の全部が括弧の中なら、括弧を外すだけで中身は残す
         await Assert.That(TitleKey.Of("「例の特番」").Name).IsEqualTo("例の特番");
         await Assert.That(TitleKey.Of("<アニメギルド>例のアニメ🈟").Name).IsEqualTo("例のアニメ");
+        // 英字の略称は、続きが英数字なら別の語の先頭なので落とさない
+        await Assert.That(TitleKey.Of("ＴＯＳＨＩＢＡ例の劇場").Name).IsEqualTo("toshiba例の劇場");
+        await Assert.That(TitleKey.Of("ＴＯＳ例の劇場").Name).IsEqualTo("例の劇場");
 
         var tbs = Airing(Kanto, TbsKanto, "[字]ＴＢＳ日曜劇場「例のドラマ」　第３話");
         var mbs = Airing(Kinki, MbsKinki, "日曜劇場 例のドラマ 第3話[字][デ]");

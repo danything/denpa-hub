@@ -45,16 +45,24 @@ public static class Grouping
             .CompareTo((b.Airing.StartAt, b.Region ?? 0, b.Airing.Id.ServiceId, b.Airing.Id.EventId)));
         var groups = new List<Cluster>();
         var alone = new List<Item>();
+        // 探す先は、系列ごとの、最初の放送の始まりが 10 分の幅に入っているまとまりだけ。始まりの順に入れるので、幅を外れたまとまりにはもう入らない。
+        // 全国の地上波 (9 日分で数万件) を、まとまりの全部と比べずに済ませるため
+        var open = new Dictionary<int, List<Cluster>>();
+        var window = (long)StartWindow.TotalSeconds;
         foreach (var item in crossing)
         {
+            var targets = open.TryGetValue(item.Affiliation!.Value, out var list) ? list : open[item.Affiliation.Value] = [];
+            targets.RemoveAll(g => g.Members[0].Airing.StartAt < item.Airing.StartAt - window);
             // まとまりの全部の放送と同じ番組とみなせるときだけ入れる。名前が同じものを、含まれるかで当たるものより先に選ぶ
-            var group = groups
+            var group = targets
                 .Where(g => g.Members.All(m => Same(m, item)))
                 .OrderByDescending(g => g.Members.Any(m => m.Key.Name == item.Key.Name))
                 .FirstOrDefault();
             if (group is null)
             {
-                groups.Add(new Cluster(item));
+                var cluster = new Cluster(item);
+                groups.Add(cluster);
+                targets.Add(cluster);
                 continue;
             }
             // 1 つの地域から同じ系列の放送が 2 つ以上まとまろうとしたら、まとめない。同じ地域の家が違う放送を予約しているので、別の番組とみる
