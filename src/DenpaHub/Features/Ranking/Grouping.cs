@@ -15,16 +15,16 @@ public static class Grouping
     /// <summary>含まれるかで見るときの、短いほうの名前の長さの下限 (長いほうに対する割合。10 分の 6)</summary>
     public const int MinContainedTenths = 6;
 
-    /// <summary>まとめるかを見る放送 1 つ。系列が無い・整えた名前が短いものは地域をまたがない</summary>
-    sealed record Item(Candidate Airing, int? Affiliation, int? Region, TitleKey.Key Key)
+    /// <summary>まとめるかを見る、系列のある地上波の局の放送 1 つ。整えた名前が短いものは地域をまたがない</summary>
+    sealed record Item(Candidate Airing, int Affiliation, TitleKey.Key Key)
     {
-        public bool Crosses => Affiliation is not null && Key.Length >= TitleKey.MinLength;
+        public bool Crosses => Key.Length >= TitleKey.MinLength;
     }
 
     sealed class Cluster(Item first)
     {
         public List<Item> Members { get; } = [first];
-        /// <summary>同じ地域の放送がもう 1 つまとまろうとした。最後にばらす</summary>
+        /// <summary>同じ局の放送がもう 1 つまとまろうとした。最後にばらす</summary>
         public bool Conflicted { get; set; }
     }
 
@@ -35,14 +35,16 @@ public static class Grouping
         var crossing = new List<Item>();
         foreach (var candidate in candidates)
         {
-            var item = new Item(candidate, Terrestrial.AffiliationOf(candidate.Id), Terrestrial.RegionOf(candidate.Id), TitleKey.Of(candidate.Name));
-            if (item.Crosses) crossing.Add(item);
-            else result.Add([candidate]);
+            // 名前を整えるのは、地域をまたぎうる放送 (系列のある地上波の局) だけ
+            if (Terrestrial.AffiliationOf(candidate.Id) is { } affiliation && new Item(candidate, affiliation, TitleKey.Of(candidate.Name)) is { Crosses: true } item)
+                crossing.Add(item);
+            else
+                result.Add([candidate]);
         }
 
-        // 毎回同じまとまりになるよう、始まりの順 (同じなら地域と識別の順) に入れていく
-        crossing.Sort((a, b) => (a.Airing.StartAt, a.Region ?? 0, a.Airing.Id.ServiceId, a.Airing.Id.EventId)
-            .CompareTo((b.Airing.StartAt, b.Region ?? 0, b.Airing.Id.ServiceId, b.Airing.Id.EventId)));
+        // 毎回同じまとまりになるよう、始まりの順 (同じなら識別の順。地上波の service_id は上位のビットが地域) に入れていく
+        crossing.Sort((a, b) => (a.Airing.StartAt, a.Airing.Id.ServiceId, a.Airing.Id.EventId)
+            .CompareTo((b.Airing.StartAt, b.Airing.Id.ServiceId, b.Airing.Id.EventId)));
         var groups = new List<Cluster>();
         var alone = new List<Item>();
         // 探す先は、系列ごとの、最初の放送の始まりが 10 分の幅に入っているまとまりだけ。始まりの順に入れるので、幅を外れたまとまりにはもう入らない。
@@ -51,13 +53,20 @@ public static class Grouping
         var window = (long)StartWindow.TotalSeconds;
         foreach (var item in crossing)
         {
-            var targets = open.TryGetValue(item.Affiliation!.Value, out var list) ? list : open[item.Affiliation.Value] = [];
+            var targets = open.TryGetValue(item.Affiliation, out var list) ? list : open[item.Affiliation] = [];
             targets.RemoveAll(g => g.Members[0].Airing.StartAt < item.Airing.StartAt - window);
             // まとまりの全部の放送と同じ番組とみなせるときだけ入れる。名前が同じものを、含まれるかで当たるものより先に選ぶ
-            var group = targets
-                .Where(g => g.Members.All(m => Same(m, item)))
-                .OrderByDescending(g => g.Members.Any(m => m.Key.Name == item.Key.Name))
-                .FirstOrDefault();
+            Cluster? group = null;
+            foreach (var target in targets)
+            {
+                if (!target.Members.TrueForAll(m => Same(m, item))) continue;
+                if (target.Members.Exists(m => m.Key.Name == item.Key.Name))
+                {
+                    group = target;
+                    break;
+                }
+                group ??= target;
+            }
             if (group is null)
             {
                 var cluster = new Cluster(item);
@@ -65,8 +74,9 @@ public static class Grouping
                 targets.Add(cluster);
                 continue;
             }
-            // 1 つの地域から同じ系列の放送が 2 つ以上まとまろうとしたら、まとめない。同じ地域の家が違う放送を予約しているので、別の番組とみる
-            if (group.Members.Any(m => m.Region == item.Region))
+            // 1 つの局から 2 つ以上の放送がまとまろうとしたら、まとめない (同じ名前の短い番組を続けて流すなど)。同じ局の家が違う放送を予約しているので、別の番組とみる。
+            // 同じ地域の同じ系列の別の局 (福岡の NHK の福岡と北九州) は、同じ番組を流しているのでまとめる
+            if (group.Members.Exists(m => m.Airing.Id.ServiceId == item.Airing.Id.ServiceId))
             {
                 group.Conflicted = true;
                 alone.Add(item);
@@ -90,8 +100,7 @@ public static class Grouping
     /// </summary>
     static bool Same(Item a, Item b)
     {
-        if (a.Affiliation != b.Affiliation) return false;
-        if (Math.Abs(a.Airing.StartAt - b.Airing.StartAt) > (long)StartWindow.TotalSeconds) return false;
+        if (a.Affiliation != b.Affiliation || Math.Abs(a.Airing.StartAt - b.Airing.StartAt) > (long)StartWindow.TotalSeconds) return false;
         if (a.Key.Name == b.Key.Name) return true;
         var (shorter, longer) = a.Key.Length <= b.Key.Length ? (a.Key, b.Key) : (b.Key, a.Key);
         if (shorter.Length < MinContainedLength || shorter.Length * 10 < longer.Length * MinContainedTenths) return false;

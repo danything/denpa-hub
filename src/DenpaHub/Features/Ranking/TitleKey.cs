@@ -29,7 +29,7 @@ public static partial class TitleKey
         // キー局と準キー局・広域の局
         "日本テレビ", "日テレ", "tbs", "フジテレビ", "テレビ朝日", "テレ朝", "テレビ東京", "テレ東",
         "mbs", "毎日放送", "abcテレビ", "abc", "関西テレビ", "カンテレ", "ktv", "読売テレビ", "ytv",
-        "東海テレビ", "cbcテレビ", "cbc", "メ~テレ", "中京テレビ", "テレビ愛知", "テレビ大阪",
+        "東海テレビ", "cbcテレビ", "cbc", "メ~テレ", "メ〜テレ", "中京テレビ", "テレビ愛知", "テレビ大阪",
         "hbc", "北海道放送", "stv", "札幌テレビ", "htb", "北海道テレビ", "uhb", "tvh",
         "rnc", "西日本テレビ", "ksb", "瀬戸内海放送", "rsk", "tsc", "テレビせとうち", "ohk",
         "山陰中央テレビ", "bss", "日本海テレビ",
@@ -60,8 +60,8 @@ public static partial class TitleKey
     /// <summary>整えた名前と、読めれば話数</summary>
     public readonly record struct Key(string Name, int? Episode)
     {
-        /// <summary>整えた名前の文字数 (コードポイントで数える)</summary>
-        public int Length => Name.EnumerateRunes().Count();
+        /// <summary>整えた名前の文字数 (コードポイントで数える)。まとめるときに何度も比べるので、作るときに 1 度だけ数える</summary>
+        public int Length { get; } = Name.EnumerateRunes().Count();
     }
 
     /// <summary>番組表のとおりの番組名から、整えた名前と話数を作る</summary>
@@ -83,6 +83,7 @@ public static partial class TitleKey
     static string Fold(string name)
     {
         var builder = new StringBuilder(name.Length);
+        Span<char> units = stackalloc char[2];
         foreach (var rune in name.EnumerateRunes())
         {
             if (IsDecorationMark(rune)) continue;
@@ -93,7 +94,7 @@ public static partial class TitleKey
                 0xFF65 => new Rune('・'), // 半角の中黒
                 _ => rune,
             };
-            builder.Append(c.ToString());
+            builder.Append(units[..c.EncodeToUtf16(units)]);
         }
         return builder.ToString().ToLowerInvariant();
     }
@@ -123,9 +124,13 @@ public static partial class TitleKey
             return text[station.Length..];
         }
         if (LeadingLabel().Match(text) is { Success: true } label) return text[label.Length..];
-        if (LeadingQuote().Match(text) is { Success: true } quote) return text[quote.Length..];
+        // 括弧の後ろが話数と副題だけなら、括弧の中が番組名なので落とさない (`「例のドラマ」#5「副題」`)
+        if (LeadingQuote().Match(text) is { Success: true } quote && HasTitle(text[quote.Length..])) return text[quote.Length..];
         return text;
     }
+
+    /// <summary>話数と末尾の副題を除いても、名前が残るか</summary>
+    static bool HasTitle(string text) => Symbols().Replace(TrailingSubtitle().Replace(Episode().Replace(text, ""), ""), "").Length > 0;
 
     /// <summary>
     /// 話数。denpa の <c>parseTitle</c> と同じ読み方で、末尾の <c>「副題」</c> と期 (<c>第2期</c>) を除いてから、

@@ -52,6 +52,10 @@ public class GroupingTests
         await Assert.That(TitleKey.Of("「大阪」ローカルの例の番組").Name).IsEqualTo("ローカルの例の番組");
         // 名前の全部が括弧の中なら、括弧を外すだけで中身は残す
         await Assert.That(TitleKey.Of("「例の特番」").Name).IsEqualTo("例の特番");
+        // 括弧の後ろが話数と副題だけなら、括弧の中が番組名なので落とさない
+        await Assert.That(TitleKey.Of("「例のドラマ」＃５「副題」").Name).IsEqualTo("例のドラマ#5副題");
+        await Assert.That(TitleKey.Of("「例のドラマ」第１２話").Name).IsEqualTo("例のドラマ第12話");
+        await Assert.That(TitleKey.Of("メ〜テレ例のアニメ").Name).IsEqualTo("例のアニメ");
         await Assert.That(TitleKey.Of("<アニメギルド>例のアニメ🈟").Name).IsEqualTo("例のアニメ");
         // 英字の略称は、続きが英数字なら別の語の先頭なので落とさない
         await Assert.That(TitleKey.Of("ＴＯＳＨＩＢＡ例の劇場").Name).IsEqualTo("toshiba例の劇場");
@@ -101,7 +105,7 @@ public class GroupingTests
     }
 
     [Test]
-    public async Task 同じ地域から同じ系列の放送が_2_つまとまろうとしたらまとめない()
+    public async Task 同じ局から_2_つの放送がまとまろうとしたらまとめない()
     {
         var name = "例のバラエティ拡大SP";
         var first = Airing(Kanto, TbsKanto, name);
@@ -112,12 +116,54 @@ public class GroupingTests
     }
 
     [Test]
+    public async Task 同じ地域の同じ系列の別の局はまとめる()
+    {
+        // 福岡の地域には NHK総合が 2 局 (福岡と北九州) あり、全国の番組は両方で流れる
+        var name = "例の全国の番組";
+        var fukuoka = Airing(Prefecture, 56320, name);
+        var kitakyushu = Airing(Prefecture, 56832, name);
+        var kanto = Airing(Kanto, 1024, name);
+        var groups = Groups(fukuoka, kitakyushu, kanto);
+        await Assert.That(groups.Count).IsEqualTo(1);
+        await Assert.That(groups[0]).IsEquivalentTo(Ids(fukuoka, kitakyushu, kanto));
+    }
+
+    [Test]
     public async Task 独立局と系列の違う局とBSはまとめない()
     {
         var name = "例のバラエティ拡大SP";
         await Assert.That(Groups(Airing(Prefecture, TokyoMx, name), Airing(Prefecture, SunTv, name))).Count().IsEqualTo(2);
         await Assert.That(Groups(Airing(Kanto, TbsKanto, name), Airing(Kanto, NtvKanto, name))).Count().IsEqualTo(2);
         await Assert.That(Groups(Airing(Kanto, TbsKanto, name), Airing(4, 211, name))).Count().IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task 全国の地上波の_9_日分を_5_秒以内にまとめる()
+    {
+        // 系列の表の全部の局が、9 日のあいだ 1 時間ごとに放送する (5 万件ほど)。系列の番組は前置きや飾りを変えて全部の局で流し、5 局に 1 局は地域の番組にする
+        string[] prefixes = ["", "[字]", "ＴＢＳ", "【ドラマ】", "<枠>"];
+        var candidates = new List<Candidate>();
+        var services = Terrestrial.Affiliations.Keys.Order().ToArray();
+        for (var slot = 0; slot < 9 * 24; slot++)
+        {
+            for (var i = 0; i < services.Length; i++)
+            {
+                var affiliation = Terrestrial.Affiliations[services[i]];
+                var name = (i + slot) % 5 == 0
+                    ? $"地域の番組{services[i]}の{slot}"
+                    : $"{prefixes[(i + slot) % prefixes.Length]}系列の番組{affiliation}の{slot}　第{slot % 12 + 1}話";
+                candidates.Add(new(new AiringId(Prefecture, services[i], slot + 1), 1, 0, name, "局", [3], Start + slot * 3600 + i % 3 * 60));
+            }
+        }
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var groups = Grouping.Group(candidates);
+        watch.Stop();
+        // 手元では、ほかのテストと並べて動かして 1 秒ほど。CI の遅さを見込んで 5 秒まで許す
+        await Assert.That(watch.Elapsed).IsLessThan(TimeSpan.FromSeconds(5));
+        // 系列の番組は時間ごとに系列の数 (7) にまとまり、地域の番組は 1 つずつ残る
+        var local = candidates.Count(c => c.Name.StartsWith("地域", StringComparison.Ordinal));
+        await Assert.That(groups.Count).IsEqualTo(9 * 24 * 7 + local);
     }
 
     [Test]
