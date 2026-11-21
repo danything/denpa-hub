@@ -2,7 +2,7 @@
 
     <!--
         各家庭の denpa から使う、Doa が動かす共通のサーバ (README.md)。
-        機能ごとに Features/<名前>/ にまとめる。ニコニコの OAuth の中継 (docs/niconico.md) と予約数ランキング (docs/ranking.md)。
+        機能ごとに Features/<名前>/ にまとめる。ニコニコの OAuth の中継 (docs/niconico.md) と番組ランキング (docs/ranking.md)。
 
         Native AOT で実行ファイルにし、distroless のイメージに置く。依存のパッケージは Microsoft.Data.Sqlite だけ
         (ランキングのデータ。AOT で動くことを確かめた。組み込みの SQLite の libe_sqlite3.so を実行ファイルの隣に置く)。

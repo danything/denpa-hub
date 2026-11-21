@@ -6,14 +6,14 @@ namespace DenpaHub.Tests;
 /// <summary>地上波の地域をまたぐまとめ (docs/ranking.md の「地上波の地域をまたぐもの」)</summary>
 public class GroupingTests
 {
-    const int Kanto = 0x7FE0;
-    const int Kinki = 0x7FD0;
+    internal const int Kanto = 0x7FE0;
+    internal const int Kinki = 0x7FD0;
     const int Chukyo = 0x7FC0;
     const int Prefecture = 0x7F00;
 
     // 系列の表にある局 (service_id)
-    const int TbsKanto = 1048; // 関東広域 TBS
-    const int MbsKinki = 2064; // 近畿広域 MBS毎日放送
+    internal const int TbsKanto = 1048; // 関東広域 TBS
+    internal const int MbsKinki = 2064; // 近畿広域 MBS毎日放送
     const int CbcChukyo = 3096; // 中京広域 CBC
     const int NtvKanto = 1040; // 関東広域 日テレ
     const int TokyoMx = 23608; // 東京 TOKYO MX1 (独立局)
@@ -24,7 +24,7 @@ public class GroupingTests
     static int nextEvent = 1;
 
     static Candidate Airing(int networkId, int serviceId, string name, long? start = null, int manual = 1, int rule = 0) =>
-        new(new AiringId(networkId, serviceId, Interlocked.Increment(ref nextEvent)), manual, rule, name, "局", [3], start ?? Start);
+        new(new AiringId(networkId, serviceId, Interlocked.Increment(ref nextEvent)), new Counts(manual + rule, manual + rule, 0, 0, 0), name, "局", [3], start ?? Start, 1800, (start ?? Start) + 1800);
 
     /// <summary>まとまった放送の組を、event_id の並びで返す (比べやすいように)</summary>
     static List<int[]> Groups(params Candidate[] airings) =>
@@ -152,7 +152,7 @@ public class GroupingTests
                 var name = (i + slot) % 5 == 0
                     ? $"地域の番組{services[i]}の{slot}"
                     : $"{prefixes[(i + slot) % prefixes.Length]}系列の番組{affiliation}の{slot}　第{slot % 12 + 1}話";
-                candidates.Add(new(new AiringId(Prefecture, services[i], slot + 1), 1, 0, name, "局", [3], Start + slot * 3600 + i % 3 * 60));
+                candidates.Add(new(new AiringId(Prefecture, services[i], slot + 1), new Counts(1, 1, 0, 0, 0), name, "局", [3], Start + slot * 3600 + i % 3 * 60, 1800, Start + slot * 3600 + 1800));
             }
         }
 

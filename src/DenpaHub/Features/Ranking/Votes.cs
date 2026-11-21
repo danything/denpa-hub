@@ -10,12 +10,34 @@ public readonly record struct AiringId(int NetworkId, int ServiceId, int EventId
     public static bool IsCountedNetwork(int networkId) => networkId is 4 or 6 or 7 || Terrestrial.IsTerrestrial(networkId);
 }
 
-/// <summary>送られた予約 1 件 (<c>add</c> の 1 つ)</summary>
+/// <summary>
+/// その家がその放送をどうしたか (<c>add</c> の <c>kinds</c>)。印に 4 ビットで持つ。
+/// 一覧 (人気の番組) の数は予約とライブの和集合 (<see cref="Listed"/>)、録画・ライブ・タイムシフトは外部に示す集計 (<c>tallies</c>) の数
+/// </summary>
+[Flags]
+public enum Kinds
+{
+    None = 0,
+    /// <summary>予約した (録る予定。録画中・録り終えたあとも)</summary>
+    Reserved = 1,
+    /// <summary>その局のライブで合わせて 5 分以上観た (10 分より短い番組は長さの半分)</summary>
+    Live = 2,
+    /// <summary>録画を録り終えた</summary>
+    Recorded = 4,
+    /// <summary>録画を観る画面か追っかけで合わせて 5 分以上再生した (放送が終わって 7 日以内)</summary>
+    Timeshift = 8,
+    /// <summary>一覧の数に入れる種類</summary>
+    Listed = Reserved | Live,
+    /// <summary>放送が終わってからしか受けない種類。放送中の「いま観ている」を hub に届かせない</summary>
+    AfterEnd = Live | Recorded | Timeshift,
+}
+
+/// <summary>送られた放送 1 件 (<c>add</c> の 1 つ)</summary>
 /// <param name="StartAt">始まり (Unix 秒)</param>
 /// <param name="Duration">長さ (秒)</param>
 /// <param name="Genres">ジャンルの大分類。送られた順のまま、重なりだけを除く</param>
-/// <param name="Manual">手動の予約なら true、ルールの予約なら false</param>
-public sealed record AddVote(AiringId Id, long StartAt, int Duration, string Name, string ServiceName, IReadOnlyList<int> Genres, bool Manual)
+/// <param name="Kinds">その家の、その放送についての今の種類の組。送り直すと置き換える</param>
+public sealed record AddVote(AiringId Id, long StartAt, int Duration, string Name, string ServiceName, IReadOnlyList<int> Genres, Kinds Kinds)
 {
     public long EndAt => StartAt + Duration;
 }
@@ -35,6 +57,11 @@ public static class VoteRequest
     public const int MaxRemove = 5000;
     /// <summary>受ける番組の始まりは今から 9 日先まで (denpa の番組表の幅)</summary>
     public static readonly TimeSpan Horizon = TimeSpan.FromDays(9);
+    /// <summary>
+    /// 受ける番組の終わりは今から 8 日前より後。タイムシフトを数える 7 日に、6 時間ごとの送信と再試行の分の 1 日を足した幅。
+    /// これを過ぎた放送は数を決めて集計の表に移す (<see cref="RankingStore.Cleanup"/>)
+    /// </summary>
+    public static readonly TimeSpan AfterEnd = TimeSpan.FromDays(8);
     public const int MaxDuration = 24 * 60 * 60;
     public const int MaxName = 120;
     public const int MaxServiceName = 40;
@@ -94,9 +121,11 @@ public static class VoteRequest
         if (!item.TryGetProperty("start_at", out var startText) || startText.ValueKind != JsonValueKind.String
             || !DateTimeOffset.TryParseExact(startText.GetString(), TimeFormats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var start))
             return null;
-        // 始まった番組は数えない。先は番組表の幅まで
-        if (start <= now || start > now + Horizon) return null;
+        // 先は番組表の幅まで。終わった番組はタイムシフトを数える間まで
+        if (start > now + Horizon) return null;
         if (!Int(item, "duration", 1, MaxDuration, out var duration)) return null;
+        var end = start.AddSeconds(duration);
+        if (end <= now - AfterEnd) return null;
         if (!Text(item, "name", MaxName, out var name) || !Text(item, "service_name", MaxServiceName, out var serviceName)) return null;
         if (!item.TryGetProperty("genres", out var genreItems) || genreItems.ValueKind != JsonValueKind.Array || genreItems.GetArrayLength() > 16) return null;
         var genres = new List<int>();
@@ -105,15 +134,34 @@ public static class VoteRequest
             if (genre.ValueKind != JsonValueKind.Number || !genre.TryGetInt32(out var g) || g is < 0 or > 15) return null;
             if (!genres.Contains(g)) genres.Add(g);
         }
-        if (!item.TryGetProperty("kind", out var kind) || kind.ValueKind != JsonValueKind.String) return null;
-        bool manual;
-        switch (kind.GetString())
+        if (ReadKinds(item) is not { } kinds) return null;
+        // 録った・観たは、放送が終わってから送るもの。放送中に届けば、送った時刻が「いま観ている」に近くなる
+        if ((kinds & Kinds.AfterEnd) != 0 && end > now) return null;
+        return new AddVote(id, start.ToUnixTimeSeconds(), duration, name, serviceName, genres, kinds);
+    }
+
+    /// <summary>
+    /// <c>kinds</c> を読む。知らない種類は読み飛ばし (新しい denpa が足した種類で、全体を断らないため)、知っている種類が 1 つも無ければ null。
+    /// <c>kinds</c> の無いもの (<c>kind</c> で手動かルールかを送っていた denpa) は予約として受ける。<c>kind</c> の中身は使わない
+    /// </summary>
+    static Kinds? ReadKinds(JsonElement item)
+    {
+        if (!item.TryGetProperty("kinds", out var items)) return Kinds.Reserved;
+        if (items.ValueKind != JsonValueKind.Array || items.GetArrayLength() > 16) return null;
+        var kinds = Kinds.None;
+        foreach (var e in items.EnumerateArray())
         {
-            case "manual": manual = true; break;
-            case "rule": manual = false; break;
-            default: return null;
+            if (e.ValueKind != JsonValueKind.String) return null;
+            kinds |= e.GetString() switch
+            {
+                "reserved" => Kinds.Reserved,
+                "live" => Kinds.Live,
+                "recorded" => Kinds.Recorded,
+                "timeshift" => Kinds.Timeshift,
+                _ => Kinds.None,
+            };
         }
-        return new AddVote(id, start.ToUnixTimeSeconds(), duration, name, serviceName, genres, manual);
+        return kinds == Kinds.None ? null : kinds;
     }
 
     static AiringId? ReadId(JsonElement item)

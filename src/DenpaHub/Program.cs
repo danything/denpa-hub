@@ -3,12 +3,32 @@ using DenpaHub.Features.Niconico;
 using DenpaHub.Features.Ranking;
 using Microsoft.Data.Sqlite;
 
+var env = new Env(Environment.GetEnvironmentVariable);
+
+// 外部に示す集計を読み出す (Doa がコンテナの中で動かす)。サーバは立てない
+if (args is [Tallies.Command, ..])
+{
+    try
+    {
+        return Tallies.Run(args, RankingSettings.Load(env), Console.Out, Console.Error);
+    }
+    catch (SettingsException e)
+    {
+        Console.Error.WriteLine($"設定の誤り: {e.Message}");
+        return 2;
+    }
+    catch (SqliteException e)
+    {
+        Console.Error.WriteLine($"RANKING_DATA のファイルを読めません (SQLite のエラー {e.SqliteErrorCode})");
+        return 1;
+    }
+}
+
 HubSettings hub;
 NiconicoSettings niconico;
 RankingSettings? ranking;
 try
 {
-    var env = new Env(Environment.GetEnvironmentVariable);
     hub = HubSettings.Load(env);
     niconico = NiconicoSettings.Load(env, hub);
     ranking = RankingSettings.Load(env);
