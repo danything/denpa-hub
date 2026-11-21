@@ -7,7 +7,8 @@ using Microsoft.AspNetCore.Http.Features;
 namespace DenpaHub.Features.Ranking;
 
 /// <summary>
-/// 予約数ランキング。参加した denpa の予約を放送ごとに数え、よく予約されている番組の順位を、送ったトークンだけに返す。
+/// 番組ランキング。参加した denpa の予約とライブの視聴を放送ごとに家の数で数え、人気の番組の順位を、送ったトークンだけに返す。
+/// 録画・ライブ・タイムシフトの家の数は、終わって 8 日たったら数を決めて集計の表に移す (<see cref="Tallies"/>)。
 /// 契約は docs/ranking.md。地上波の同時ネットは、地域をまたいで 1 つの番組にまとめて数える (<see cref="Grouping"/>)
 /// </summary>
 public static class RankingFeature

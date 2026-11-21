@@ -47,19 +47,43 @@ sealed class RankingHarness : IAsyncDisposable
         return json.RootElement.GetProperty("token").GetString()!;
     }
 
+    /// <summary>
+    /// 送る放送 1 件。<paramref name="kinds"/> を省くと、今の denpa と同じ形 (<c>kind</c> だけ。予約として受ける) で送る
+    /// </summary>
     public static JsonObject Airing(int eventId, DateTimeOffset start, string kind = "manual", string name = "例の番組 #7", int networkId = 4, int serviceId = 211,
-        int duration = 1800, string serviceName = "BS11イレブン", int[]? genres = null) => new()
+        int duration = 1800, string serviceName = "BS11イレブン", int[]? genres = null, string[]? kinds = null)
     {
-        ["network_id"] = networkId,
-        ["service_id"] = serviceId,
-        ["event_id"] = eventId,
-        ["start_at"] = start.ToOffset(TimeSpan.FromHours(9)).ToString("yyyy-MM-dd'T'HH:mm:sszzz"),
-        ["duration"] = duration,
-        ["name"] = name,
-        ["service_name"] = serviceName,
-        ["genres"] = new JsonArray([.. (genres ?? [7]).Select(g => (JsonNode)g)]),
-        ["kind"] = kind,
-    };
+        var airing = new JsonObject
+        {
+            ["network_id"] = networkId,
+            ["service_id"] = serviceId,
+            ["event_id"] = eventId,
+            ["start_at"] = start.ToOffset(TimeSpan.FromHours(9)).ToString("yyyy-MM-dd'T'HH:mm:sszzz"),
+            ["duration"] = duration,
+            ["name"] = name,
+            ["service_name"] = serviceName,
+            ["genres"] = new JsonArray([.. (genres ?? [7]).Select(g => (JsonNode)g)]),
+        };
+        if (kinds is null) airing["kind"] = kind;
+        else airing["kinds"] = new JsonArray([.. kinds.Select(k => (JsonNode)k)]);
+        return airing;
+    }
+
+    /// <summary>集計の表に移す処理と順位を作り直す処理を、毎時 0 分と同じ順に動かす</summary>
+    public void Tick()
+    {
+        Store.Cleanup(Time.Now);
+        Hub.App.Services.GetRequiredService<RankingBoard>().Rebuild();
+    }
+
+    /// <summary>集計の表を、読み出す処理 (<c>denpa-hub tallies</c>) と同じ形で読む</summary>
+    public JsonElement[] ReadTallies(DateOnly? from = null, DateOnly? to = null)
+    {
+        using var buffer = new MemoryStream();
+        Tallies.Write(DataPath, from, to, buffer);
+        using var json = JsonDocument.Parse(buffer.ToArray());
+        return [.. json.RootElement.GetProperty("tallies").EnumerateArray().Select(e => e.Clone())];
+    }
 
     public static JsonObject Id(int eventId, int networkId = 4, int serviceId = 211) => new()
     {
@@ -287,27 +311,65 @@ public class RankingTests
     }
 
     [Test]
-    public async Task ルールの予約は_0_5_票で_votes_は_5_の倍数に切り下げる()
+    public async Task 予約した家とライブで観た家を_1_家_1_で数え_votes_は_5_の倍数に切り下げる()
     {
         await using var h = await RankingHarness.StartAsync();
         var start = h.Time.Now.AddDays(1);
-        // 手動 7 = 7 → 5
-        await h.VoteManyAsync(7, RankingHarness.Airing(1, start));
-        // 手動 5 + ルール 10 = 10
-        await h.VoteManyAsync(5, RankingHarness.Airing(2, start, kind: "manual"));
-        var tokens = await h.VoteManyAsync(10, RankingHarness.Airing(2, start, kind: "rule"));
-        // ルール 8 = 4 → 0 なので出さない
-        await h.VoteManyAsync(8, RankingHarness.Airing(3, start, kind: "rule"));
+        // 予約 7 = 7 → 5 (手動もルールも同じ 1)
+        await h.VoteManyAsync(4, RankingHarness.Airing(1, start, kind: "manual"));
+        await h.VoteManyAsync(3, RankingHarness.Airing(1, start, kind: "rule"));
+        // 予約 10 = 10
+        var tokens = await h.VoteManyAsync(10, RankingHarness.Airing(2, start, kinds: ["reserved"]));
+        // 4 → 0 なので出さない
+        await h.VoteManyAsync(4, RankingHarness.Airing(3, start));
 
         var entries = Entries(await h.RankingAsync(tokens[0]));
         await Assert.That(string.Join(" ", entries.Select(e => $"{e.GetProperty("rank")}:{e.GetProperty("votes")}:{e.GetProperty("airings")[0].GetProperty("event_id")}")))
             .IsEqualTo("1:10:2 2:5:1");
+    }
 
-        // ルールの予約を手動の予約に変えると数え直す (手動 5 + 手動 1 + ルール 9 = 10.5 → 10)。トークンの数は変わらない
-        using (var changed = await h.SendAsync(tokens[0], [RankingHarness.Airing(2, start, kind: "manual")])) await Assert.That(changed.StatusCode).IsEqualTo(HttpStatusCode.OK);
-        var after = Entries(await h.RankingAsync(tokens[0]));
-        await Assert.That(after[0].GetProperty("votes").GetInt32()).IsEqualTo(10);
-        await Assert.That(h.Store.Count("marks")).IsEqualTo(30);
+    [Test]
+    public async Task 終わった番組は予約とライブの和集合で数え_録画とタイムシフトは一覧に入れない()
+    {
+        await using var h = await RankingHarness.StartAsync();
+        var start = h.Time.Now.AddHours(-3);
+        // 予約して観た家 3、観ただけの家 2 = 5。録っただけ・録画で観ただけの家 (6) は一覧の数に入らない
+        await h.VoteManyAsync(3, RankingHarness.Airing(1, start, kinds: ["reserved", "live", "recorded"]));
+        await h.VoteManyAsync(2, RankingHarness.Airing(1, start, kinds: ["live"]));
+        await h.VoteManyAsync(6, RankingHarness.Airing(2, start, kinds: ["recorded", "timeshift"]));
+        var tokens = await h.VoteManyAsync(1, RankingHarness.Airing(3, start, kinds: ["timeshift"]));
+        var entries = Entries(await h.RankingAsync(tokens[0]));
+        await Assert.That(entries.Length).IsEqualTo(1);
+        await Assert.That(entries[0].GetProperty("votes").GetInt32()).IsEqualTo(5);
+        var airing = entries[0].GetProperty("airings")[0];
+        await Assert.That(airing.GetProperty("end_at").GetString()).IsEqualTo(RankingBoard.Iso(start.AddMinutes(30)));
+
+        // 種類の組を送り直すと置き換える。観ただけの家がタイムシフトだけにすると、一覧から外れる
+        var live = await h.VoteManyAsync(1, RankingHarness.Airing(4, start, kinds: ["live"]));
+        await h.VoteManyAsync(4, RankingHarness.Airing(4, start, kinds: ["live"]));
+        await Assert.That(Entries(await h.RankingAsync(tokens[0])).Length).IsEqualTo(2);
+        using (var changed = await h.SendAsync(live[0], [RankingHarness.Airing(4, start, kinds: ["timeshift"])])) await Assert.That(changed.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        await Assert.That(Entries(await h.RankingAsync(tokens[0])).Length).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task 録った_観たは放送が終わるまで受けない()
+    {
+        await using var h = await RankingHarness.StartAsync();
+        var token = await h.IssueAsync();
+        var onAir = h.Time.Now.AddMinutes(-10);
+        using var response = await h.SendAsync(token,
+        [
+            RankingHarness.Airing(1, onAir, kinds: ["reserved"]),
+            RankingHarness.Airing(2, onAir, kinds: ["live"]),
+            RankingHarness.Airing(3, onAir, kinds: ["reserved", "recorded"]),
+            RankingHarness.Airing(4, onAir, kinds: ["timeshift"]),
+            // 終わったあとなら受ける
+            RankingHarness.Airing(5, onAir.AddHours(-1), kinds: ["live", "recorded", "timeshift"]),
+        ]);
+        var body = await BodyOf(response);
+        await Assert.That(body.GetProperty("accepted").GetInt32()).IsEqualTo(2);
+        await Assert.That(body.GetProperty("rejected").GetInt32()).IsEqualTo(3);
     }
 
     [Test]
@@ -357,33 +419,131 @@ public class RankingTests
     }
 
     [Test]
-    public async Task 放送が始まったら順位から外し_終わって_1_日たったら票を消す()
+    public async Task 一覧には終わって_24_時間までを出し_終わって_8_日たったら数を決めて集計の表に移す()
     {
         await using var h = await RankingHarness.StartAsync();
         var start = h.Time.Now.AddHours(1);
-        var tokens = await h.VoteManyAsync(5, RankingHarness.Airing(1, start, duration: 3600));
+        var end = start.AddHours(1);
+        var tokens = await h.VoteManyAsync(5, RankingHarness.Airing(1, start, duration: 3600, kinds: ["reserved"]));
         await Assert.That(Entries(await h.RankingAsync(tokens[0])).Length).IsEqualTo(1);
 
+        // 放送中も、終わって 24 時間までも出す
         h.Time.Now = start.AddMinutes(1);
         using (var sent = await h.SendAsync(tokens[0])) await Assert.That(sent.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        await Assert.That(Entries(await h.RankingAsync(tokens[0])).Length).IsEqualTo(1);
+        h.Time.Now = end.AddHours(1);
+        // 終わったあとに、録った・録画で観たを足す (3 家)。ほかに観ただけの家が 7
+        foreach (var token in tokens.Take(3))
+        {
+            using var response = await h.SendAsync(token, [RankingHarness.Airing(1, start, duration: 3600, kinds: ["reserved", "recorded", "timeshift"])]);
+            await Assert.That((await BodyOf(response)).GetProperty("accepted").GetInt32()).IsEqualTo(1);
+        }
+        await h.VoteManyAsync(7, RankingHarness.Airing(1, start, duration: 3600, kinds: ["live"]));
+        await Assert.That(Entries(await h.RankingAsync(tokens[0]))[0].GetProperty("votes").GetInt32()).IsEqualTo(10);
+        h.Time.Now = end.AddHours(24).AddMinutes(1);
         await Assert.That(Entries(await h.RankingAsync(tokens[0]))).IsEmpty();
-        // 始まった番組の add は数えない
-        using (var late = await h.SendAsync(tokens[0], [RankingHarness.Airing(2, start)]))
-            await Assert.That((await BodyOf(late)).GetProperty("rejected").GetInt32()).IsEqualTo(1);
 
-        // 終わって 1 日たつまでは残す
-        h.Time.Now = start.AddHours(1).AddDays(1).AddMinutes(-1);
-        h.Store.Cleanup(h.Time.Now);
+        // 8 日たつまでは票を受け、数は決めない
+        h.Time.Now = end.AddDays(8).AddMinutes(-1);
+        h.Tick();
         await Assert.That(h.Store.Count("airings")).IsEqualTo(1);
+        await Assert.That(h.ReadTallies()).IsEmpty();
 
-        h.Time.Now = start.AddHours(1).AddDays(1).AddMinutes(1);
-        h.Store.Cleanup(h.Time.Now);
+        h.Time.Now = end.AddDays(8).AddMinutes(1);
+        h.Tick();
         await Assert.That(h.Store.Count("airings")).IsEqualTo(0);
         await Assert.That(h.Store.Count("labels")).IsEqualTo(0);
-        // 印は放送の終わりの翌日の日付まで持ち、その日を過ぎたら消す
-        h.Time.Now = start.AddHours(1).AddDays(3);
-        h.Store.Cleanup(h.Time.Now);
+        // 8 日を過ぎた放送の add はもう受けない
+        using (var late = await h.SendAsync(tokens[4], [RankingHarness.Airing(1, start, duration: 3600, kinds: ["timeshift"])]))
+            await Assert.That((await BodyOf(late)).GetProperty("rejected").GetInt32()).IsEqualTo(1);
+
+        var tallies = h.ReadTallies();
+        await Assert.That(tallies.Length).IsEqualTo(1);
+        var tally = tallies[0];
+        await Assert.That(tally.GetProperty("name").GetString()).IsEqualTo("例の番組 #7");
+        // 一覧の数 12 → 10、録った家 3 → 0、ライブで観た家 7 → 5、タイムシフト 3 → 0
+        await Assert.That($"{tally.GetProperty("homes")} {tally.GetProperty("recorded")} {tally.GetProperty("live")} {tally.GetProperty("timeshift")}").IsEqualTo("10 0 5 0");
+        await Assert.That(tally.GetProperty("start_at").GetString()).IsEqualTo(RankingBoard.Iso(start));
+        await Assert.That(tally.GetProperty("airings")[0].GetProperty("event_id").GetInt32()).IsEqualTo(1);
+        // 集計の表には、トークンにつながるもの (印・トークンの数) を持たない
+        await Assert.That(tally.TryGetProperty("tokens", out _)).IsFalse();
+
+        // 日付で絞れる (日本時間の放送の始まり)
+        var day = DateOnly.FromDateTime(start.ToOffset(TimeSpan.FromHours(9)).DateTime);
+        await Assert.That(h.ReadTallies(day, day).Length).IsEqualTo(1);
+        await Assert.That(h.ReadTallies(day.AddDays(1)).Length).IsEqualTo(0);
+
+        // 印は、票を受けなくなった日の翌日の日付を過ぎたら消す。集計は 400 日で消す
+        h.Time.Now = end.AddDays(10);
+        h.Tick();
         await Assert.That(h.Store.Count("marks")).IsEqualTo(0);
+        await Assert.That(h.Store.Count("tallies")).IsEqualTo(1);
+        h.Time.Now = start + RankingStore.TallyLifetime + TimeSpan.FromMinutes(1);
+        h.Tick();
+        await Assert.That(h.Store.Count("tallies")).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task 地上波の同時ネットは地域をまたいでまとめて集計し_4_つとも_5_未満の番組は持たない()
+    {
+        await using var h = await RankingHarness.StartAsync();
+        var start = h.Time.Now.AddHours(-3);
+        // TBS 系の関東広域と、近畿広域の MBS (同じ時刻・同じ名前)。どちらも 3 家だが、まとめると 6
+        await h.VoteManyAsync(3, RankingHarness.Airing(1, start, networkId: GroupingTests.Kanto, serviceId: GroupingTests.TbsKanto, serviceName: "TBS", name: "日曜劇場 例のドラマ 第3話", kinds: ["live"]));
+        await h.VoteManyAsync(3, RankingHarness.Airing(2, start, networkId: GroupingTests.Kinki, serviceId: GroupingTests.MbsKinki, serviceName: "MBS", name: "日曜劇場 例のドラマ 第3話", duration: 150 * 60, kinds: ["live"]));
+        // BS の 4 家だけの番組は 4 つとも 0 になるので持たない
+        await h.VoteManyAsync(4, RankingHarness.Airing(3, start, kinds: ["live", "recorded", "timeshift"]));
+        // 関東の放送が 8 日を過ぎても、まとめる相手 (長く延びた近畿の放送) がまだ票を受けている間は待つ
+        h.Time.Now = start.AddDays(8).AddHours(1);
+        h.Tick();
+        await Assert.That(h.ReadTallies()).IsEmpty();
+        await Assert.That(h.Store.Count("airings")).IsEqualTo(2);
+        h.Time.Now = start.AddDays(9);
+        h.Tick();
+        var tallies = h.ReadTallies();
+        await Assert.That(tallies.Length).IsEqualTo(1);
+        await Assert.That(tallies[0].GetProperty("affiliation").GetString()).IsEqualTo("TBS 系");
+        await Assert.That(tallies[0].GetProperty("live").GetInt32()).IsEqualTo(5);
+        await Assert.That(tallies[0].GetProperty("airings").GetArrayLength()).IsEqualTo(2);
+        await Assert.That(h.Store.Count("airings")).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task 集計を読み出すコマンドは引数を確かめて_JSON_を標準出力に書く()
+    {
+        await using var h = await RankingHarness.StartAsync();
+        var settings = new RankingSettings(h.DataPath, Convert.FromBase64String(RankingHarness.MarkKey));
+        using (var output = new StringWriter())
+        using (var error = new StringWriter())
+        {
+            await Assert.That(Tallies.Run(["tallies", "--from", "2026-11-01", "--to", "2026-11-30"], settings, output, error)).IsEqualTo(0);
+            using var json = JsonDocument.Parse(output.ToString());
+            await Assert.That(json.RootElement.GetProperty("tallies").GetArrayLength()).IsEqualTo(0);
+        }
+        foreach (string[] args in new[] { new[] { "tallies", "--from" }, ["tallies", "--from", "2026/11/01"], ["tallies", "--since", "2026-11-01"] })
+        {
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+            await Assert.That(Tallies.Run(args, settings, output, error)).IsEqualTo(2);
+            await Assert.That(error.ToString()).Contains("使い方");
+        }
+        using (var output = new StringWriter())
+        using (var error = new StringWriter())
+        {
+            await Assert.That(Tallies.Run(["tallies", "--from", "2026-11-30", "--to", "2026-11-01"], settings, output, error)).IsEqualTo(2);
+            await Assert.That(error.ToString()).Contains("--from");
+        }
+        using (var output = new StringWriter())
+        using (var error = new StringWriter())
+            await Assert.That(Tallies.Run(["tallies"], null, output, error)).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task 順位は毎時_0_分に作り直す()
+    {
+        await Assert.That(RankingWorker.UntilNext(DateTimeOffset.Parse("2026-11-21T09:59:30Z"))).IsEqualTo(TimeSpan.FromSeconds(30));
+        await Assert.That(RankingWorker.UntilNext(DateTimeOffset.Parse("2026-11-21T10:00:00Z"))).IsEqualTo(TimeSpan.FromHours(1));
+        await Assert.That(RankingWorker.UntilNext(DateTimeOffset.Parse("2026-11-21T23:15:00Z"))).IsEqualTo(TimeSpan.FromMinutes(45));
     }
 
     [Test]
@@ -404,7 +564,7 @@ public class RankingTests
         await using var h = await RankingHarness.StartAsync();
         var token = await h.IssueAsync();
         h.Store.DeleteToken(token);
-        var vote = new AddVote(new AiringId(4, 211, 1), h.Time.Now.AddDays(1).ToUnixTimeSeconds(), 1800, "例の番組", "BS11イレブン", [7], Manual: true);
+        var vote = new AddVote(new AiringId(4, 211, 1), h.Time.Now.AddDays(1).ToUnixTimeSeconds(), 1800, "例の番組", "BS11イレブン", [7], Kinds.Reserved);
         await Assert.That(h.Store.ApplyVotes(token, [vote], [], h.Time.Now)).IsFalse();
         await Assert.That(h.Store.Count("marks")).IsEqualTo(0);
         await Assert.That(h.Store.Count("airings")).IsEqualTo(0);
@@ -442,7 +602,8 @@ public class RankingTests
             // ケーブルの自主放送・スカパー！プレミアムの network_id
             RankingHarness.Airing(2, start, networkId: 0xFFFE),
             RankingHarness.Airing(3, start, networkId: 1),
-            RankingHarness.Airing(4, h.Time.Now.AddMinutes(-1)),
+            // 終わって 8 日を過ぎた番組
+            RankingHarness.Airing(4, h.Time.Now.AddDays(-8).AddMinutes(-30)),
             RankingHarness.Airing(5, h.Time.Now.AddDays(9).AddMinutes(1)),
             RankingHarness.Airing(6, start, duration: 24 * 60 * 60 + 1),
             RankingHarness.Airing(7, start, name: new string('あ', 121)),
@@ -450,7 +611,9 @@ public class RankingTests
             RankingHarness.Airing(9, start, name: "改行\nを含む"),
             RankingHarness.Airing(10, start, serviceName: new string('あ', 41)),
             RankingHarness.Airing(11, start, genres: [16]),
-            RankingHarness.Airing(12, start, kind: "other"),
+            // 知っている種類が 1 つも無いもの・放送が終わる前の「観た」
+            RankingHarness.Airing(12, start, kinds: ["other"]),
+            RankingHarness.Airing(14, start, kinds: ["live"]),
             Bad(a => a["start_at"] = "2026-11-20T21:00:00"),
             Bad(a => a.Remove("genres")),
             // 地上波の範囲の端
@@ -460,7 +623,7 @@ public class RankingTests
         await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.OK);
         var body = await BodyOf(response);
         await Assert.That(body.GetProperty("accepted").GetInt32()).IsEqualTo(2);
-        await Assert.That(body.GetProperty("rejected").GetInt32()).IsEqualTo(14);
+        await Assert.That(body.GetProperty("rejected").GetInt32()).IsEqualTo(15);
         await Assert.That(h.Store.Count("airings")).IsEqualTo(2);
     }
 

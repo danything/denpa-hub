@@ -1,6 +1,6 @@
-# denpa-hub 本体。予約数ランキングのデータ (SQLite のファイル 1 つ) を PVC に置くので、1 台だけで動かし、
+# denpa-hub 本体。番組ランキングのデータ (SQLite のファイル 1 つ) を PVC に置くので、1 台だけで動かし、
 # 入れ替えは Recreate にする (同じファイルを 2 つのプロセスで開かないように。docs/ranking.md の「データの持ち方」)。
-# データのバックアップは取らない (どれも放送が終われば消すもので、失っても denpa が送り直せば戻る)。
+# データのバックアップは取らない (票はどれも数が決まれば消すもので、失っても denpa が送り直せば戻る。外部に示す集計は、示すときに denpa-hub tallies で読み出して手元に残す)。
 #
 # 設定のうちリポジトリに書いてよいものはここに、書かないもの (シークレットとニコニコ固有の値) は
 # SOPS で暗号化した secrets.sops.yaml・live.sops.yaml から sops-secrets-operator が作る Secret denpa-hub・denpa-hub-live にあり、envFrom で全部読む。
@@ -95,7 +95,7 @@ spec:
               value: >-
                 jk1=ch2646436,jk2=ch2646437,jk4=ch2646438,jk5=ch2646439,jk6=ch2646440,
                 jk7=ch2646441,jk8=ch2646442,jk9=ch2646485,jk101=ch2647992,jk211=ch2646846
-            # 予約数ランキングのデータ。鍵 (RANKING_MARK_KEY) は Secret denpa-hub から読む
+            # 番組ランキングのデータ。鍵 (RANKING_MARK_KEY) は Secret denpa-hub から読む
             - name: RANKING_DATA
               value: /data/ranking.db
           envFrom:

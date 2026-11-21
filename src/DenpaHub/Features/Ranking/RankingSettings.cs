@@ -1,6 +1,6 @@
 namespace DenpaHub.Features.Ranking;
 
-/// <summary>予約数ランキングの設定。名前と意味は docs/ranking.md の「データの持ち方」</summary>
+/// <summary>番組ランキングの設定。名前と意味は docs/ranking.md の「データの持ち方」</summary>
 /// <param name="DataPath">SQLite のファイルの場所</param>
 /// <param name="MarkKey">二重に数えない印を作る鍵 (32 バイト)</param>
 public sealed record RankingSettings(string DataPath, byte[] MarkKey)

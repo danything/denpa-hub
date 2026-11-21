@@ -97,4 +97,6 @@ jobs:
             | grep -q '"accepted":1'
           curl -fsS http://localhost:8080/ranking -H "Authorization: Bearer $token" | grep -q '"entries":\[\]'
           docker logs smoke 2>&1 | grep -q "ranking votes: add=1"
+          # 外部に示す集計の読み出し (同じ実行ファイルを引数付きで、動いているコンテナの中で動かす)
+          docker exec smoke /app/denpa-hub tallies --from 2026-11-01 | grep -qF '"tallies": []'
           docker rm -f smoke

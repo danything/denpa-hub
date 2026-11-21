@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 
 namespace DenpaHub.Features.Ranking;
@@ -9,23 +11,54 @@ namespace DenpaHub.Features.Ranking;
 /// <summary>トークンの記録。<paramref name="SentAt"/> は最後に送った時刻 (Unix 秒)。まだ送っていなければ null</summary>
 public sealed record TokenRecord(long? SentAt);
 
-/// <summary>順位の元になる放送 1 つ。名前などは票を入れたトークンの多いもの</summary>
-public sealed record Candidate(AiringId Id, int Manual, int Rule, string Name, string ServiceName, IReadOnlyList<int> Genres, long StartAt);
+/// <summary>
+/// 放送 1 つ (か、まとめた番組 1 つ) の数。どれも印を入れたトークンの数で、1 つの家は 1。
+/// <paramref name="Tokens"/> は種類によらず印のあるトークン、<paramref name="Homes"/> は一覧の数 (予約とライブの和集合)
+/// </summary>
+public readonly record struct Counts(int Tokens, int Homes, int Recorded, int Live, int Timeshift)
+{
+    public static Counts Of(Kinds kinds) => new(
+        1,
+        (kinds & Kinds.Listed) != 0 ? 1 : 0,
+        (kinds & Kinds.Recorded) != 0 ? 1 : 0,
+        (kinds & Kinds.Live) != 0 ? 1 : 0,
+        (kinds & Kinds.Timeshift) != 0 ? 1 : 0);
+
+    public static Counts operator +(Counts a, Counts b) =>
+        new(a.Tokens + b.Tokens, a.Homes + b.Homes, a.Recorded + b.Recorded, a.Live + b.Live, a.Timeshift + b.Timeshift);
+
+    public static Counts operator -(Counts a) => new(-a.Tokens, -a.Homes, -a.Recorded, -a.Live, -a.Timeshift);
+
+    public static Counts operator -(Counts a, Counts b) => a + -b;
+}
 
 /// <summary>
-/// 予約数ランキングのデータ (SQLite のファイル 1 つ)。表の形と、何を持たないかは docs/ranking.md の「データの持ち方」。
+/// 順位と集計の元になる放送 1 つ。名前などは印を入れたトークンの多いもの。
+/// <paramref name="LastEnd"/> は送られた中でいちばん遅い終わり (集計の表に移す時期を決める)
+/// </summary>
+public sealed record Candidate(AiringId Id, Counts Counts, string Name, string ServiceName, IReadOnlyList<int> Genres, long StartAt, int Duration, long LastEnd)
+{
+    public long EndAt => StartAt + Duration;
+}
+
+/// <summary>
+/// 番組ランキングのデータ (SQLite のファイル 1 つ)。表の形と、何を持たないかは docs/ranking.md の「データの持ち方」。
 ///
-/// 接続は 1 つで、ロックで順に使う。1 台のプロセスだけがファイルを開く前提 (Deployment は replicas: 1・Recreate)
+/// 接続は 1 つで、ロックで順に使う。1 台のプロセスだけがファイルを開く前提 (Deployment は replicas: 1・Recreate)。
+/// 集計の表を読み出すだけのもの (<see cref="Tallies"/>) は、別のプロセスから読み取り専用で開く
 /// </summary>
 public sealed class RankingStore : IDisposable
 {
     /// <summary>表の形のバージョン。変えたら、中身を捨てて作り直す (どれも放送が終われば消すもので、denpa が送り直せば戻るため)</summary>
-    const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
 
     /// <summary>印に使う HMAC の長さ。300 万行でも重なる見込みは無視できる</summary>
     const int MarkLength = 16;
     /// <summary>印に添える、そのトークンが入れた番組名などの HMAC の長さ。1 つの放送の候補の中で見分けられれば足りる</summary>
     const int LabelLength = 8;
+
+    /// <summary>集計の表に残す長さ。前の年の同じ時期と比べられる幅</summary>
+    public static readonly TimeSpan TallyLifetime = TimeSpan.FromDays(400);
 
     /// <summary>番組名・局名・ジャンル・時刻。トークンごとにどれを入れたかを、印に添えて持つ</summary>
     enum Field
@@ -58,7 +91,7 @@ public sealed class RankingStore : IDisposable
         if (version != SchemaVersion && version != 0)
         {
             log.LogWarning("ranking: schema {Old} -> {New}, data dropped", version, SchemaVersion);
-            Execute("DROP TABLE IF EXISTS tokens; DROP TABLE IF EXISTS airings; DROP TABLE IF EXISTS labels; DROP TABLE IF EXISTS marks;");
+            Execute("DROP TABLE IF EXISTS tokens; DROP TABLE IF EXISTS airings; DROP TABLE IF EXISTS labels; DROP TABLE IF EXISTS marks; DROP TABLE IF EXISTS tallies;");
         }
         Execute($"""
             CREATE TABLE IF NOT EXISTS tokens (
@@ -71,8 +104,11 @@ public sealed class RankingStore : IDisposable
                 service_id INTEGER NOT NULL,
                 event_id INTEGER NOT NULL,
                 end_at INTEGER NOT NULL,
-                manual INTEGER NOT NULL,
-                rule INTEGER NOT NULL,
+                tokens INTEGER NOT NULL,
+                homes INTEGER NOT NULL,
+                recorded INTEGER NOT NULL,
+                live INTEGER NOT NULL,
+                timeshift INTEGER NOT NULL,
                 PRIMARY KEY (network_id, service_id, event_id)
             ) WITHOUT ROWID;
             CREATE INDEX IF NOT EXISTS airings_end ON airings (end_at);
@@ -87,11 +123,25 @@ public sealed class RankingStore : IDisposable
             ) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS marks (
                 mark BLOB PRIMARY KEY,
-                kind INTEGER NOT NULL,
+                kinds INTEGER NOT NULL,
                 expires_on INTEGER NOT NULL,
                 labels BLOB NOT NULL
             ) WITHOUT ROWID;
             CREATE INDEX IF NOT EXISTS marks_expires ON marks (expires_on);
+            CREATE TABLE IF NOT EXISTS tallies (
+                id INTEGER PRIMARY KEY,
+                start_at INTEGER NOT NULL,
+                end_at INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                genres TEXT NOT NULL,
+                affiliation TEXT,
+                airings TEXT NOT NULL,
+                homes INTEGER NOT NULL,
+                recorded INTEGER NOT NULL,
+                live INTEGER NOT NULL,
+                timeshift INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS tallies_start ON tallies (start_at);
             PRAGMA user_version = {SchemaVersion};
             """);
     }
@@ -134,8 +184,8 @@ public sealed class RankingStore : IDisposable
     }
 
     /// <summary>
-    /// 票を数えに入れ、最後に送った時刻を書き換える。1 トークン 1 放送 1 票で、同じ放送をもう一度送れば中身 (手かルールか・名前・時刻) を書き換える。
-    /// remove は、そのトークンの票が無い放送なら何もしない。
+    /// 票を数えに入れ、最後に送った時刻を書き換える。1 トークン 1 放送 1 つで、同じ放送をもう一度送れば中身 (種類の組・名前・時刻) を書き換える。
+    /// remove は、そのトークンの印が無い放送なら何もしない。
     /// トークンが無ければ (取り消された・消された) 何も書かずに false を返す。認証のあとに取り消しが割り込んでも、取り消したトークンの票を残さない
     /// </summary>
     public bool ApplyVotes(string token, IReadOnlyList<AddVote> adds, IReadOnlyList<AiringId> removes, DateTimeOffset now)
@@ -158,30 +208,42 @@ public sealed class RankingStore : IDisposable
     }
 
     /// <summary>
-    /// まだ始まっていない放送のうち、票を入れたトークンが <paramref name="minTokens"/> 以上のものと、地上波のものの全部 (地域をまたいでまとめてから数えるため)。
-    /// 名前・局名・ジャンル・時刻は、それぞれ票の多いもの
+    /// 一覧 (人気の番組) の元になる放送。終わりが <paramref name="endAfter"/> より後で、一覧の数が <paramref name="minHomes"/> 以上のものと、
+    /// 一覧の数のある地上波のものの全部 (地域をまたいでまとめてから数えるため)
     /// </summary>
-    public List<Candidate> ReadCandidates(int minTokens, DateTimeOffset now)
+    public List<Candidate> ReadListed(int minHomes, long endAfter)
     {
-        var seconds = now.ToUnixTimeSeconds();
+        lock (gate) return ReadCandidates(endAfter, long.MaxValue, minHomes, null);
+    }
+
+    /// <summary>
+    /// 読み出す。名前・局名・ジャンル・時刻は、それぞれ票の多いもの。<paramref name="minHomes"/> が null なら数によらず全部
+    /// </summary>
+    List<Candidate> ReadCandidates(long endAfter, long endBefore, int? minHomes, SqliteTransaction? transaction)
+    {
         var candidates = new List<Candidate>();
         AiringId? id = null;
-        (int Manual, int Rule) count = default;
+        Counts count = default;
+        long lastEnd = 0;
         var best = new (string? Value, long Votes)[Fields.Length];
-        lock (gate)
+        // 放送の順に読み、放送が替わるたびに 1 つ作る
+        using var command = Command($"""
+            SELECT a.network_id, a.service_id, a.event_id, a.tokens, a.homes, a.recorded, a.live, a.timeshift, a.end_at, l.field, l.value, l.votes
+            FROM airings a JOIN labels l USING (network_id, service_id, event_id)
+            WHERE a.end_at > $after AND a.end_at <= $before
+            {(minHomes is null ? "" : "AND a.homes > 0 AND (a.homes >= $min OR a.network_id BETWEEN $terrestrialFrom AND $terrestrialTo)")}
+            ORDER BY a.network_id, a.service_id, a.event_id
+            """, transaction);
+        command.Parameters.AddWithValue("$after", endAfter);
+        command.Parameters.AddWithValue("$before", endBefore);
+        if (minHomes is { } min)
         {
-            // 放送の順に読み、放送が替わるたびに 1 つ作る。終わった放送は始まりを読むまでもなく外す
-            using var command = Command("""
-                SELECT a.network_id, a.service_id, a.event_id, a.manual, a.rule, l.field, l.value, l.votes
-                FROM airings a JOIN labels l USING (network_id, service_id, event_id)
-                WHERE a.end_at > $now AND (a.manual + a.rule >= $min OR a.network_id BETWEEN $terrestrialFrom AND $terrestrialTo)
-                ORDER BY a.network_id, a.service_id, a.event_id
-                """);
-            command.Parameters.AddWithValue("$now", seconds);
-            command.Parameters.AddWithValue("$min", minTokens);
+            command.Parameters.AddWithValue("$min", min);
             command.Parameters.AddWithValue("$terrestrialFrom", Terrestrial.FirstNetwork);
             command.Parameters.AddWithValue("$terrestrialTo", Terrestrial.LastNetwork);
-            using var reader = command.ExecuteReader();
+        }
+        using (var reader = command.ExecuteReader())
+        {
             while (reader.Read())
             {
                 var next = new AiringId(reader.GetInt32(0), reader.GetInt32(1), reader.GetInt32(2));
@@ -189,56 +251,52 @@ public sealed class RankingStore : IDisposable
                 {
                     Flush();
                     id = next;
-                    count = (reader.GetInt32(3), reader.GetInt32(4));
+                    count = new Counts(reader.GetInt32(3), reader.GetInt32(4), reader.GetInt32(5), reader.GetInt32(6), reader.GetInt32(7));
+                    lastEnd = reader.GetInt64(8);
                     Array.Clear(best);
                 }
                 // 欄ごとに票の多いもの。同じ数なら文字の順で先のもの (毎回同じものを選ぶため)
-                var field = reader.GetInt32(5);
-                var value = reader.GetString(6);
-                var votes = reader.GetInt64(7);
+                var field = reader.GetInt32(9);
+                var value = reader.GetString(10);
+                var votes = reader.GetInt64(11);
                 ref var current = ref best[field];
                 if (current.Value is null || votes > current.Votes || (votes == current.Votes && string.CompareOrdinal(value, current.Value) < 0))
                     current = (value, votes);
             }
-            Flush();
         }
+        Flush();
         return candidates;
 
         void Flush()
         {
             if (id is not { } airing) return;
             if (best[(int)Field.Name].Value is not { } name || best[(int)Field.ServiceName].Value is not { } service || best[(int)Field.Time].Value is not { } time) return;
-            var startAt = ParseTime(time).StartAt;
-            if (startAt <= seconds) return;
-            candidates.Add(new Candidate(airing, count.Manual, count.Rule, name, service, ParseGenres(best[(int)Field.Genres].Value), startAt));
+            var (startAt, duration) = ParseTime(time);
+            candidates.Add(new Candidate(airing, count, name, service, ParseGenres(best[(int)Field.Genres].Value), startAt, duration, lastEnd));
         }
     }
 
-    /// <summary>消す時期を過ぎたものを消す (docs/ranking.md の「消す時期」)。消した件数を返す</summary>
-    public (int Marks, int Airings, int Tokens) Cleanup(DateTimeOffset now)
+    /// <summary>
+    /// 消す時期を過ぎたものを消す (docs/ranking.md の「消す時期」)。終わって 8 日たった放送は、数を決めて集計の表に移してから消す。
+    /// 消した件数を返す (<c>Airings</c> は集計の表に移した放送の数、<c>Tallies</c> は作った集計の行の数)
+    /// </summary>
+    public (int Marks, int Airings, int Tallies, int Tokens) Cleanup(DateTimeOffset now)
     {
         var seconds = now.ToUnixTimeSeconds();
         lock (gate)
         {
             using var transaction = db.BeginTransaction();
-            int marks, airings, tokens;
+            var (airings, tallies) = Settle(seconds, transaction);
+            int marks, tokens;
             using (var command = Command("DELETE FROM marks WHERE expires_on < $today", transaction))
             {
                 command.Parameters.AddWithValue("$today", seconds / Day);
                 marks = command.ExecuteNonQuery();
             }
-            using (var command = Command("""
-                DELETE FROM labels WHERE (network_id, service_id, event_id) IN
-                    (SELECT network_id, service_id, event_id FROM airings WHERE end_at < $before)
-                """, transaction))
+            using (var command = Command("DELETE FROM tallies WHERE start_at < $before", transaction))
             {
-                command.Parameters.AddWithValue("$before", seconds - Day);
+                command.Parameters.AddWithValue("$before", seconds - (long)TallyLifetime.TotalSeconds);
                 command.ExecuteNonQuery();
-            }
-            using (var command = Command("DELETE FROM airings WHERE end_at < $before", transaction))
-            {
-                command.Parameters.AddWithValue("$before", seconds - Day);
-                airings = command.ExecuteNonQuery();
             }
             using (var command = Command("DELETE FROM tokens WHERE coalesce(sent_at, created_on * $day) < $before", transaction))
             {
@@ -247,9 +305,98 @@ public sealed class RankingStore : IDisposable
                 tokens = command.ExecuteNonQuery();
             }
             transaction.Commit();
-            return (marks, airings, tokens);
+            return (marks, airings, tallies, tokens);
         }
     }
+
+    /// <summary>
+    /// **数を決める。** 終わって 8 日たち、もう票を受けない放送を、一覧と同じ決まりで番組にまとめ (<see cref="Grouping"/>)、
+    /// 4 つの数をそれぞれ 5 の倍数に切り下げて集計の表に書き、放送を消す。4 つとも 0 の番組は書かない。
+    /// 地域をまたいでまとめる相手がまだ票を受けている番組は、相手も 8 日たつまで待つ (まとめる前に一部だけを数えないため)
+    /// </summary>
+    (int Airings, int Tallies) Settle(long now, SqliteTransaction transaction)
+    {
+        var cutoff = now - (long)VoteRequest.SettleAfter.TotalSeconds;
+        // まとめる相手は始まりが 10 分以内で、長さは 24 時間まで。終わりの差はその和に収まるので、2 日先までを読めば相手が揃う
+        var candidates = ReadCandidates(long.MinValue, cutoff + 2 * Day, null, transaction);
+        var settled = 0;
+        var written = 0;
+        foreach (var group in Grouping.Group(candidates))
+        {
+            if (!group.TrueForAll(c => c.LastEnd <= cutoff)) continue;
+            var sum = group.Aggregate(default(Counts), (s, c) => s + c.Counts);
+            var tally = new Counts(sum.Tokens, Round(sum.Homes), Round(sum.Recorded), Round(sum.Live), Round(sum.Timeshift));
+            if (tally.Homes > 0 || tally.Recorded > 0 || tally.Live > 0 || tally.Timeshift > 0)
+            {
+                WriteTally(group, tally, transaction);
+                written++;
+            }
+            foreach (var airing in group)
+            {
+                using var command = Command("""
+                    DELETE FROM labels WHERE network_id = $n AND service_id = $s AND event_id = $e;
+                    DELETE FROM airings WHERE network_id = $n AND service_id = $s AND event_id = $e;
+                    """, transaction);
+                command.Parameters.AddWithValue("$n", airing.Id.NetworkId);
+                command.Parameters.AddWithValue("$s", airing.Id.ServiceId);
+                command.Parameters.AddWithValue("$e", airing.Id.EventId);
+                command.ExecuteNonQuery();
+                settled++;
+            }
+        }
+        // 名前などが揃わず読めなかった放送 (labels の無いもの) は、数えようが無いので消す
+        using (var command = Command("""
+            DELETE FROM labels WHERE (network_id, service_id, event_id) IN (SELECT network_id, service_id, event_id FROM airings WHERE end_at <= $before);
+            DELETE FROM airings WHERE end_at <= $before;
+            """, transaction))
+        {
+            command.Parameters.AddWithValue("$before", cutoff - 2 * Day);
+            settled += command.ExecuteNonQuery();
+        }
+        return (settled, written);
+    }
+
+    void WriteTally(List<Candidate> group, Counts tally, SqliteTransaction transaction)
+    {
+        var airings = group.OrderBy(c => c.StartAt).ThenBy(c => c.Id.ServiceId).ThenBy(c => c.Id.EventId).ToList();
+        var lead = airings.MaxBy(c => c.Counts.Tokens)!;
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+        {
+            json.WriteStartArray();
+            foreach (var airing in airings)
+            {
+                json.WriteStartObject();
+                json.WriteNumber("network_id", airing.Id.NetworkId);
+                json.WriteNumber("service_id", airing.Id.ServiceId);
+                json.WriteNumber("event_id", airing.Id.EventId);
+                json.WriteString("start_at", RankingBoard.Iso(airing.StartAt));
+                json.WriteString("end_at", RankingBoard.Iso(airing.EndAt));
+                json.WriteString("service_name", airing.ServiceName);
+                json.WriteString("region", Terrestrial.RegionName(airing.Id));
+                json.WriteEndObject();
+            }
+            json.WriteEndArray();
+        }
+        using var command = Command("""
+            INSERT INTO tallies (start_at, end_at, name, genres, affiliation, airings, homes, recorded, live, timeshift)
+            VALUES ($start, $end, $name, $genres, $affiliation, $airings, $homes, $recorded, $live, $timeshift)
+            """, transaction);
+        command.Parameters.AddWithValue("$start", airings[0].StartAt);
+        command.Parameters.AddWithValue("$end", airings.Max(c => c.EndAt));
+        command.Parameters.AddWithValue("$name", lead.Name);
+        command.Parameters.AddWithValue("$genres", string.Join(',', lead.Genres));
+        command.Parameters.AddWithValue("$affiliation", Terrestrial.AffiliationOf(lead.Id) is { } a ? Terrestrial.AffiliationNames[a] : DBNull.Value);
+        command.Parameters.AddWithValue("$airings", Encoding.UTF8.GetString(buffer.ToArray()));
+        command.Parameters.AddWithValue("$homes", tally.Homes);
+        command.Parameters.AddWithValue("$recorded", tally.Recorded);
+        command.Parameters.AddWithValue("$live", tally.Live);
+        command.Parameters.AddWithValue("$timeshift", tally.Timeshift);
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>5 の倍数に切り下げる。5 未満は 0 で、1・2 の家の数を見せない</summary>
+    public static int Round(int count) => count / RankingBoard.Step * RankingBoard.Step;
 
     /// <summary>表ごとの行の数。テストが、消す処理と取り消しのあとの行の数を確かめるのに使う</summary>
     internal long Count(string table)
@@ -295,7 +442,7 @@ public sealed class RankingStore : IDisposable
         $"{vote.StartAt}/{vote.Duration}",
     ];
 
-    static IReadOnlyList<int> ParseGenres(string? value) =>
+    internal static IReadOnlyList<int> ParseGenres(string? value) =>
         string.IsNullOrEmpty(value) ? [] : [.. value.Split(',').Select(int.Parse)];
 
     static (long StartAt, int Duration) ParseTime(string value)
@@ -336,7 +483,7 @@ public sealed class RankingStore : IDisposable
             foreach (var field in Fields) store.Label(token, id, field, values[(int)field]).CopyTo(labels, (int)field * LabelLength);
 
             var previous = ReadMark(mark);
-            // 放送が消えたあとに印だけが残っているときは、新しい票として数える
+            // 放送が消えたあと (集計の表に移したあと) に印だけが残っているときは、新しい票として数える
             if (previous is not null && !AiringExists(id))
             {
                 DeleteMark(mark);
@@ -346,14 +493,15 @@ public sealed class RankingStore : IDisposable
             long endAt;
             if (previous is null)
             {
-                endAt = UpsertAiring(id, vote.EndAt, vote.Manual ? 1 : 0, vote.Manual ? 0 : 1);
+                endAt = UpsertAiring(id, vote.EndAt, Counts.Of(vote.Kinds));
                 foreach (var field in Fields) AddLabel(id, field, values[(int)field], 1);
             }
             else
             {
-                var (kind, old) = previous.Value;
-                var move = kind == vote.Manual ? 0 : vote.Manual ? 1 : -1;
-                endAt = UpsertAiring(id, vote.EndAt, move, -move);
+                var (kinds, old) = previous.Value;
+                // トークンの数は変わらない。種類の組の差だけを足す
+                var change = Counts.Of(vote.Kinds) - Counts.Of(kinds);
+                endAt = UpsertAiring(id, vote.EndAt, change);
                 foreach (var field in Fields)
                 {
                     var slot = old.AsSpan((int)field * LabelLength, LabelLength);
@@ -363,14 +511,14 @@ public sealed class RankingStore : IDisposable
                 }
             }
 
-            // 印は放送 (候補の中でいちばん遅い終わり) の翌日の日付まで持つ。放送より先に印が消えると、同じトークンの票を二重に数えうるため
+            // 印は、放送 (候補の中でいちばん遅い終わり) が票を受けなくなった日の翌日の日付まで持つ。放送より先に印が消えると、同じトークンの票を二重に数えうるため
             using var command = store.Command("""
-                INSERT INTO marks (mark, kind, expires_on, labels) VALUES ($mark, $kind, $expires, $labels)
-                ON CONFLICT (mark) DO UPDATE SET kind = excluded.kind, expires_on = excluded.expires_on, labels = excluded.labels
+                INSERT INTO marks (mark, kinds, expires_on, labels) VALUES ($mark, $kinds, $expires, $labels)
+                ON CONFLICT (mark) DO UPDATE SET kinds = excluded.kinds, expires_on = excluded.expires_on, labels = excluded.labels
                 """, transaction);
             command.Parameters.AddWithValue("$mark", mark);
-            command.Parameters.AddWithValue("$kind", vote.Manual ? 1 : 0);
-            command.Parameters.AddWithValue("$expires", (endAt + Day) / Day);
+            command.Parameters.AddWithValue("$kinds", (int)vote.Kinds);
+            command.Parameters.AddWithValue("$expires", (endAt + (long)VoteRequest.SettleAfter.TotalSeconds + Day) / Day);
             command.Parameters.AddWithValue("$labels", labels);
             command.ExecuteNonQuery();
         }
@@ -382,32 +530,24 @@ public sealed class RankingStore : IDisposable
             DeleteMark(mark);
             if (!AiringExists(id)) return;
             foreach (var field in Fields) RemoveLabel(id, field, previous.Labels.AsSpan((int)field * LabelLength, LabelLength));
-            using (var command = store.Command("UPDATE airings SET manual = manual - $manual, rule = rule - $rule WHERE network_id = $n AND service_id = $s AND event_id = $e", transaction))
-            {
-                Bind(command, id);
-                command.Parameters.AddWithValue("$manual", previous.Manual ? 1 : 0);
-                command.Parameters.AddWithValue("$rule", previous.Manual ? 0 : 1);
-                command.ExecuteNonQuery();
-            }
-            // 票が無くなった放送は、名前ごと消す
-            using (var command = store.Command("""
+            UpsertAiring(id, 0, -Counts.Of(previous.Kinds));
+            // 印が無くなった放送は、名前ごと消す
+            using var command = store.Command("""
                 DELETE FROM labels WHERE network_id = $n AND service_id = $s AND event_id = $e
-                    AND EXISTS (SELECT 1 FROM airings WHERE network_id = $n AND service_id = $s AND event_id = $e AND manual + rule <= 0);
-                DELETE FROM airings WHERE network_id = $n AND service_id = $s AND event_id = $e AND manual + rule <= 0;
-                """, transaction))
-            {
-                Bind(command, id);
-                command.ExecuteNonQuery();
-            }
+                    AND EXISTS (SELECT 1 FROM airings WHERE network_id = $n AND service_id = $s AND event_id = $e AND tokens <= 0);
+                DELETE FROM airings WHERE network_id = $n AND service_id = $s AND event_id = $e AND tokens <= 0;
+                """, transaction);
+            Bind(command, id);
+            command.ExecuteNonQuery();
         }
 
-        (bool Manual, byte[] Labels)? ReadMark(byte[] mark)
+        (Kinds Kinds, byte[] Labels)? ReadMark(byte[] mark)
         {
-            using var command = store.Command("SELECT kind, labels FROM marks WHERE mark = $mark", transaction);
+            using var command = store.Command("SELECT kinds, labels FROM marks WHERE mark = $mark", transaction);
             command.Parameters.AddWithValue("$mark", mark);
             using var reader = command.ExecuteReader();
             if (!reader.Read()) return null;
-            return (reader.GetInt32(0) == 1, (byte[])reader.GetValue(1));
+            return ((Kinds)reader.GetInt32(0), (byte[])reader.GetValue(1));
         }
 
         void DeleteMark(byte[] mark)
@@ -425,18 +565,23 @@ public sealed class RankingStore : IDisposable
         }
 
         /// <summary>数を足し、終わりの時刻を遅いほうに寄せる。書いたあとの終わりの時刻を返す</summary>
-        long UpsertAiring(AiringId id, long endAt, int manual, int rule)
+        long UpsertAiring(AiringId id, long endAt, Counts change)
         {
             using var command = store.Command("""
-                INSERT INTO airings (network_id, service_id, event_id, end_at, manual, rule) VALUES ($n, $s, $e, $end, $manual, $rule)
+                INSERT INTO airings (network_id, service_id, event_id, end_at, tokens, homes, recorded, live, timeshift)
+                VALUES ($n, $s, $e, $end, $tokens, $homes, $recorded, $live, $timeshift)
                 ON CONFLICT (network_id, service_id, event_id) DO UPDATE SET
-                    end_at = max(end_at, excluded.end_at), manual = manual + excluded.manual, rule = rule + excluded.rule
+                    end_at = max(end_at, excluded.end_at), tokens = tokens + excluded.tokens, homes = homes + excluded.homes,
+                    recorded = recorded + excluded.recorded, live = live + excluded.live, timeshift = timeshift + excluded.timeshift
                 RETURNING end_at
                 """, transaction);
             Bind(command, id);
             command.Parameters.AddWithValue("$end", endAt);
-            command.Parameters.AddWithValue("$manual", manual);
-            command.Parameters.AddWithValue("$rule", rule);
+            command.Parameters.AddWithValue("$tokens", change.Tokens);
+            command.Parameters.AddWithValue("$homes", change.Homes);
+            command.Parameters.AddWithValue("$recorded", change.Recorded);
+            command.Parameters.AddWithValue("$live", change.Live);
+            command.Parameters.AddWithValue("$timeshift", change.Timeshift);
             return Convert.ToInt64(command.ExecuteScalar());
         }
 
