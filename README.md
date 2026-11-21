@@ -42,7 +42,7 @@ docker run --rm -p 8080:8080 \
   -e PUBLIC_ORIGIN=https://hub.example.jp \
   -e NICONICO_CLIENT_SECRET_FILE=/run/secrets/niconico-client-secret \
   ... \
-  ghcr.io/danything/denpa-hub:v0.5.0
+  ghcr.io/danything/denpa-hub:v0.6.0
 ```
 
 イメージは Native AOT の実行ファイル 1 個を distroless (`gcr.io/distroless/cc-debian13:nonroot`) に置いたもので、シェルもパッケージ管理も無く、root でも動きません。
