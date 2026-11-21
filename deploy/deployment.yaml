@@ -34,7 +34,7 @@ spec:
   storageClassName: local-path
   resources:
     requests:
-      # 見積もりは参加する家が 1 万で 200 MB 前後 (docs/ranking.md の「データの持ち方」)
+      # 見積もりは参加する家が 1 万で、印が 300 MB 前後と、集計の表が 400 日で数百 MB (docs/ranking.md の「データの持ち方」)
       storage: 2Gi
 ---
 apiVersion: apps/v1

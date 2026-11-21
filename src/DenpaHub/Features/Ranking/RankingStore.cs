@@ -52,7 +52,7 @@ public sealed class RankingStore : IDisposable
     /// <summary>表の形のバージョン。変えたら、中身を捨てて作り直す (どれも放送が終われば消すもので、denpa が送り直せば戻るため)</summary>
     public const int SchemaVersion = 2;
 
-    /// <summary>印に使う HMAC の長さ。300 万行でも重なる見込みは無視できる</summary>
+    /// <summary>印に使う HMAC の長さ。450 万行でも重なる見込みは無視できる</summary>
     const int MarkLength = 16;
     /// <summary>印に添える、そのトークンが入れた番組名などの HMAC の長さ。1 つの放送の候補の中で見分けられれば足りる</summary>
     const int LabelLength = 8;
