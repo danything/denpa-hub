@@ -69,7 +69,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: denpa-hub
-          image: ghcr.io/danything/denpa-hub:v0.5.0@sha256:853a239808ff1d0be7e70d7efa5a15ffc54f4c5b127f36fd356a66527958e72f
+          image: ghcr.io/danything/denpa-hub:v0.6.0@sha256:f7a562f5428fe2836fcbdd9f209a7ff8275afb8f0d45e097915f1da85066ff16
           ports:
             - containerPort: 8080
           env:
