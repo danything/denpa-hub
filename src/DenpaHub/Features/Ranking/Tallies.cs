@@ -38,6 +38,11 @@ public static class Tallies
             else to = date;
             i++;
         }
+        if (from > to)
+        {
+            error.WriteLine("--from は --to と同じか前の日付にしてください");
+            return 2;
+        }
         using var stream = new MemoryStream();
         Write(settings.DataPath, from, to, stream);
         output.Write(System.Text.Encoding.UTF8.GetString(stream.ToArray()));

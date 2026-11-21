@@ -29,7 +29,7 @@ public enum Kinds
     /// <summary>一覧の数に入れる種類</summary>
     Listed = Reserved | Live,
     /// <summary>放送が終わってからしか受けない種類。放送中の「いま観ている」を hub に届かせない</summary>
-    AfterEnd = Live | Recorded | Timeshift,
+    AfterEndOnly = Live | Recorded | Timeshift,
 }
 
 /// <summary>送られた放送 1 件 (<c>add</c> の 1 つ)</summary>
@@ -61,7 +61,7 @@ public static class VoteRequest
     /// 受ける番組の終わりは今から 8 日前より後。タイムシフトを数える 7 日に、6 時間ごとの送信と再試行の分の 1 日を足した幅。
     /// これを過ぎた放送は数を決めて集計の表に移す (<see cref="RankingStore.Cleanup"/>)
     /// </summary>
-    public static readonly TimeSpan AfterEnd = TimeSpan.FromDays(8);
+    public static readonly TimeSpan SettleAfter = TimeSpan.FromDays(8);
     public const int MaxDuration = 24 * 60 * 60;
     public const int MaxName = 120;
     public const int MaxServiceName = 40;
@@ -125,7 +125,7 @@ public static class VoteRequest
         if (start > now + Horizon) return null;
         if (!Int(item, "duration", 1, MaxDuration, out var duration)) return null;
         var end = start.AddSeconds(duration);
-        if (end <= now - AfterEnd) return null;
+        if (end <= now - SettleAfter) return null;
         if (!Text(item, "name", MaxName, out var name) || !Text(item, "service_name", MaxServiceName, out var serviceName)) return null;
         if (!item.TryGetProperty("genres", out var genreItems) || genreItems.ValueKind != JsonValueKind.Array || genreItems.GetArrayLength() > 16) return null;
         var genres = new List<int>();
@@ -136,7 +136,7 @@ public static class VoteRequest
         }
         if (ReadKinds(item) is not { } kinds) return null;
         // 録った・観たは、放送が終わってから送るもの。放送中に届けば、送った時刻が「いま観ている」に近くなる
-        if ((kinds & Kinds.AfterEnd) != 0 && end > now) return null;
+        if ((kinds & Kinds.AfterEndOnly) != 0 && end > now) return null;
         return new AddVote(id, start.ToUnixTimeSeconds(), duration, name, serviceName, genres, kinds);
     }
 

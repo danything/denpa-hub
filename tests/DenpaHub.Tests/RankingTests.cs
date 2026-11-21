@@ -487,12 +487,17 @@ public class RankingTests
     public async Task 地上波の同時ネットは地域をまたいでまとめて集計し_4_つとも_5_未満の番組は持たない()
     {
         await using var h = await RankingHarness.StartAsync();
-        var start = h.Time.Now.AddHours(-2);
+        var start = h.Time.Now.AddHours(-3);
         // TBS 系の関東広域と、近畿広域の MBS (同じ時刻・同じ名前)。どちらも 3 家だが、まとめると 6
         await h.VoteManyAsync(3, RankingHarness.Airing(1, start, networkId: GroupingTests.Kanto, serviceId: GroupingTests.TbsKanto, serviceName: "TBS", name: "日曜劇場 例のドラマ 第3話", kinds: ["live"]));
-        await h.VoteManyAsync(3, RankingHarness.Airing(2, start, networkId: GroupingTests.Kinki, serviceId: GroupingTests.MbsKinki, serviceName: "MBS", name: "日曜劇場 例のドラマ 第3話", kinds: ["live"]));
+        await h.VoteManyAsync(3, RankingHarness.Airing(2, start, networkId: GroupingTests.Kinki, serviceId: GroupingTests.MbsKinki, serviceName: "MBS", name: "日曜劇場 例のドラマ 第3話", duration: 150 * 60, kinds: ["live"]));
         // BS の 4 家だけの番組は 4 つとも 0 になるので持たない
         await h.VoteManyAsync(4, RankingHarness.Airing(3, start, kinds: ["live", "recorded", "timeshift"]));
+        // 関東の放送が 8 日を過ぎても、まとめる相手 (長く延びた近畿の放送) がまだ票を受けている間は待つ
+        h.Time.Now = start.AddDays(8).AddHours(1);
+        h.Tick();
+        await Assert.That(h.ReadTallies()).IsEmpty();
+        await Assert.That(h.Store.Count("airings")).IsEqualTo(2);
         h.Time.Now = start.AddDays(9);
         h.Tick();
         var tallies = h.ReadTallies();
@@ -521,6 +526,12 @@ public class RankingTests
             using var error = new StringWriter();
             await Assert.That(Tallies.Run(args, settings, output, error)).IsEqualTo(2);
             await Assert.That(error.ToString()).Contains("使い方");
+        }
+        using (var output = new StringWriter())
+        using (var error = new StringWriter())
+        {
+            await Assert.That(Tallies.Run(["tallies", "--from", "2026-11-30", "--to", "2026-11-01"], settings, output, error)).IsEqualTo(2);
+            await Assert.That(error.ToString()).Contains("--from");
         }
         using (var output = new StringWriter())
         using (var error = new StringWriter())

@@ -316,7 +316,7 @@ public sealed class RankingStore : IDisposable
     /// </summary>
     (int Airings, int Tallies) Settle(long now, SqliteTransaction transaction)
     {
-        var cutoff = now - (long)VoteRequest.AfterEnd.TotalSeconds;
+        var cutoff = now - (long)VoteRequest.SettleAfter.TotalSeconds;
         // まとめる相手は始まりが 10 分以内で、長さは 24 時間まで。終わりの差はその和に収まるので、2 日先までを読めば相手が揃う
         var candidates = ReadCandidates(long.MinValue, cutoff + 2 * Day, null, transaction);
         var settled = 0;
@@ -518,7 +518,7 @@ public sealed class RankingStore : IDisposable
                 """, transaction);
             command.Parameters.AddWithValue("$mark", mark);
             command.Parameters.AddWithValue("$kinds", (int)vote.Kinds);
-            command.Parameters.AddWithValue("$expires", (endAt + (long)VoteRequest.AfterEnd.TotalSeconds + Day) / Day);
+            command.Parameters.AddWithValue("$expires", (endAt + (long)VoteRequest.SettleAfter.TotalSeconds + Day) / Day);
             command.Parameters.AddWithValue("$labels", labels);
             command.ExecuteNonQuery();
         }

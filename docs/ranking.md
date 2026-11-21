@@ -217,6 +217,7 @@ Content-Type: application/json
   - `network_id` は BS の 4、CS の 6・7、地上波の 0x7880〜0x7FE8 だけを受けます (ARIB TR-B14・TR-B15。denpa の `types.ts` の `origin` と同じ範囲)。4K の BS (0x000B) は受けません
   - `start_at` は時差の付いた ISO 8601 (`2026-11-20T21:00:00+09:00` か `…Z`) だけを受けます。番組名と局名は前後の空白を除いて数え、改行などの制御文字を含むものは受けません
   - `kinds` の知らない種類は読み飛ばします (新しい denpa が種類を足しても、全体を断らないため)。`kinds` が無ければ `reserved` とします。`kind` の中身は使いません
+  - 終わっていない放送に `live`・`recorded`・`timeshift` が付いていると、`reserved` が一緒でも 1 件ごと断ります。denpa は放送中には `reserved` だけを送るので、予約まで数えられなくなることはありません
   - `remove` は、そのトークンが票を入れていない放送なら何もせず、`accepted` に数えます (同じ取り消しを送り直してもよいように)
 - 本文の全体が読めないときは断り、最後に送った時刻も書き換えません。JSON でない・`add` や `remove` が配列でないときは `400 {"error":"invalid_request"}`、
   `v` が 1 でないときは `400 {"error":"unsupported_version"}`、`add` が 2000 件か `remove` が 5000 件を超えるときは `400 {"error":"too_many_items"}` です。本文は 1 MiB まで
@@ -366,7 +367,7 @@ Content-Type: application/json
 kubectl exec -n denpa-hub deploy/denpa-hub -- /app/denpa-hub tallies --from 2026-11-01 --to 2026-11-30
 ```
 
-- `--from`・`--to` は日本時間の放送の始まりの日付で、両端を含みます。省くと端を切りません
+- `--from`・`--to` は日本時間の放送の始まりの日付で、両端を含みます。省くと端を切りません。`--from` が `--to` より後なら、使い方の誤りとして止まります
 - DB を読み取り専用で開き、標準出力に JSON を書きます。動いているサーバとは別のプロセスですが、書かないので WAL の読み手として並べます
 - 引数の誤りと `RANKING_DATA` が無いときは、終了コード 2 で使い方を書きます
 
