@@ -13,9 +13,8 @@ public abstract record LiveEvent
 }
 
 /// <summary>購読 1 本。読み終えたら Dispose で外す</summary>
-public sealed class Subscription(NxChannel channel, ChannelReader<LiveEvent> reader, Action leave) : IDisposable
+public sealed class Subscription(ChannelReader<LiveEvent> reader, Action leave) : IDisposable
 {
-    public NxChannel Channel { get; } = channel;
     public ChannelReader<LiveEvent> Reader { get; } = reader;
     int left;
 
@@ -160,7 +159,7 @@ public sealed class NxChannel : IDisposable
         lock (gate) foreach (var comment in comments) Insert(comment);
     }
 
-    /// <summary>購読を始める。<paramref name="after"/> より後の通し番号のものを送る (無い・控えより古いときは控えの全部)</summary>
+    /// <summary>購読を始める。<paramref name="after"/> より後の通し番号のものを送る (無ければ控えの全部)</summary>
     internal Subscription Join(long? after)
     {
         var queue = Channel.CreateBounded<LiveEvent>(new BoundedChannelOptions(256) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
@@ -171,13 +170,14 @@ public sealed class NxChannel : IDisposable
             Trim();
             queue.Writer.TryWrite(new LiveEvent.State(up));
             var p = policy.Current;
-            var from = after is { } a && ring.Count > 0 && a >= ring[0].Seq - 1 ? a : long.MinValue;
+            // 控えは時刻の順で、通し番号の順ではない (繋いだときの遡りは、古いものが後から大きい番号で入る)。先頭の番号では比べず、受けていない番号のものだけを送る
+            var from = after ?? long.MinValue;
             var recent = ring.Where(e => e.Seq > from && !p.IsNg(e.C.Text)).TakeLast(SendCount).ToList();
             if (recent.Count > 0) queue.Writer.TryWrite(new LiveEvent.Comments([.. recent.Select(e => e.C)], recent.Max(e => e.Seq)));
             subscribers.Add(queue);
             loop ??= Task.Run(() => RunAsync(stop.Token));
         }
-        return new Subscription(this, queue.Reader, () => Leave(queue));
+        return new Subscription(queue.Reader, () => Leave(queue));
     }
 
     void Leave(Channel<LiveEvent> queue)

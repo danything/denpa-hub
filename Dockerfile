@@ -29,7 +29,7 @@ RUN case "${TARGETARCH:-amd64}" in \
 # ---------------------------------------------------------------------------
 FROM gcr.io/distroless/cc-debian13:nonroot
 COPY --from=build /out/denpa-hub /app/denpa-hub
-# ランキングの SQLite (Microsoft.Data.Sqlite が組み込みで持つもの)。実行ファイルの隣から読む
+# ランキングと実況の SQLite (Microsoft.Data.Sqlite が組み込みで持つもの)。実行ファイルの隣から読む
 COPY --from=build /out/libe_sqlite3.so /app/libe_sqlite3.so
 ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080

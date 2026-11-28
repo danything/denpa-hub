@@ -110,6 +110,53 @@ public class JikkyoTests
     }
 
     [Test]
+    public async Task 遡りで古いものが後から来ても_受けた番号のものは送り直さず_同じものは_1_つにする()
+    {
+        await using var h = await JikkyoHarness.StartAsync();
+        var token = await h.IssueAsync();
+        // 局を開く前の独自コメントは、開いたときに控えに入る (通し番号 1)
+        using (var post = await h.PostAsync(token, "独自のコメント")) await Assert.That(post.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        // 繋いだときの遡りは、独自コメントより古いものが、新しいものから順に来る (控えの先頭に大きい番号が入る)
+        var now = h.Hub.Time.Now;
+        h.Nx.Backlog.AddRange([FakeNx.Chat("遡り 2", now.AddSeconds(-10)), FakeNx.Chat("遡り 1", now.AddSeconds(-20))]);
+        using var a = await h.SubscribeAsync(token);
+        var (_, state, _) = await a.NextAsync();
+        var epoch = JsonDocument.Parse(state).RootElement.GetProperty("epoch").GetString()!;
+        var (_, first, seen) = await a.NextAsync();
+        await Assert.That(first).Contains("独自のコメント");
+        var backlog = new List<string>();
+        while (backlog.Count < 2) backlog.AddRange((await a.CommentsAsync()).Select(c => c.GetProperty("text").GetString()!));
+
+        // 独自コメントまで受けた denpa が繋ぎ直すと、遡りの 2 件だけを受ける
+        using var b = await h.SubscribeAsync(token, query: $"?after={seen}&epoch={epoch}");
+        var resumed = await b.CommentsAsync();
+        await Assert.That(resumed.Select(c => c.GetProperty("text").GetString()!)).IsEquivalentTo(["遡り 1", "遡り 2"]);
+
+        // 繋ぎ直しで同じ時刻・同じ本文のものがまた来ても配らない
+        await h.Nx.EmitAsync(FakeNx.Chat("遡り 2", now.AddSeconds(-10)));
+        await h.Nx.EmitAsync(FakeNx.Chat("新しいコメント", now));
+        var next = await a.CommentsAsync();
+        await Assert.That(next.Select(c => c.GetProperty("text").GetString()!)).IsEquivalentTo(["新しいコメント"]);
+    }
+
+    [Test]
+    public async Task レート制限の記録に局を書かない()
+    {
+        await using var h = await JikkyoHarness.StartAsync();
+        var token = await h.IssueAsync();
+        HttpStatusCode last = default;
+        for (var i = 0; i < 31; i++)
+        {
+            using var response = await h.GetAsync(token, "/jikkyo/channels/jk404/live");
+            last = response.StatusCode;
+        }
+        await Assert.That(last).IsEqualTo(HttpStatusCode.TooManyRequests);
+        var all = string.Join("\n", h.Hub.Logs.Lines);
+        await Assert.That(all).Contains("rate limited: /jikkyo/channels/{channel}/live");
+        await Assert.That(all).DoesNotContain("jk404");
+    }
+
+    [Test]
     public async Task 書き込みは保存して配り_利用者ごとの_Cookie_で_NX_Jikkyo_にも書く_戻ってきた写しは配らない()
     {
         await using var h = await JikkyoHarness.StartAsync();
@@ -335,8 +382,9 @@ public class JikkyoTests
     }
 
     [Test]
-    public void 正規化は全角と半角_大小_ひらがなとカタカナを区別しない()
+    public async Task 正規化は全角と半角_大小_ひらがなとカタカナを区別しない()
     {
-        if (Policy.Fold("ＡＢＣ") != "abc" || Policy.Fold("ネタバレ") != "ねたばれ") throw new Exception("fold");
+        await Assert.That(Policy.Fold("ＡＢＣ")).IsEqualTo("abc");
+        await Assert.That(Policy.Fold("ネタバレ")).IsEqualTo("ねたばれ");
     }
 }

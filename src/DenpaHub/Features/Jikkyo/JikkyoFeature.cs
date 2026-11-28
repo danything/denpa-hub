@@ -23,8 +23,6 @@ public static partial class JikkyoFeature
     public static readonly TimeSpan Ping = TimeSpan.FromSeconds(15);
     /// <summary>利用者の ID を数える長さ (方針の maxAuthorsPerHome)</summary>
     public static readonly TimeSpan AuthorWindow = TimeSpan.FromDays(1);
-    /// <summary>過去ログの 1 回のリクエストの長さの上限 (過去ログ API の決まり)</summary>
-    const long MaxSpan = Kakolog.MaxSpan;
 
     static readonly string[] Colors = ["white", "red", "pink", "orange", "yellow", "green", "cyan", "blue"];
     static readonly string[] Positions = ["ue", "naka", "shita"];
@@ -39,7 +37,7 @@ public static partial class JikkyoFeature
     public static void Add(IServiceCollection services, JikkyoSettings? settings, JikkyoUpstream? upstream = null)
     {
         if (settings is null) return;
-        var userAgent = Niconico.NiconicoSettings.DefaultUserAgent;
+        var userAgent = HubSettings.DefaultUserAgent;
         services.AddSingleton(settings);
         services.AddSingleton(upstream?.Connect ?? NxSocket.Client(userAgent));
         services.AddSingleton(sp => new PolicyHolder(settings));
@@ -145,7 +143,6 @@ public static partial class JikkyoFeature
             context.Response.Headers["X-Accel-Buffering"] = "no";
             context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
             var ct = context.RequestAborted;
-            var time = Get<TimeProvider>(context);
             var reader = subscription.Reader;
             while (!ct.IsCancellationRequested)
             {
@@ -195,7 +192,7 @@ public static partial class JikkyoFeature
         var q = context.Request.Query;
         var now = Now(context).ToUnixTimeMilliseconds();
         if (!long.TryParse(q["from"].ToString(), out var from) || !long.TryParse(q["to"].ToString(), out var to)
-            || from < 0 || from >= to || to - from > MaxSpan || from >= now)
+            || from < 0 || from >= to || to - from > Kakolog.MaxSpan || from >= now)
         {
             await Hub.ErrorAsync(context, StatusCodes.Status400BadRequest, "invalid_request");
             return;

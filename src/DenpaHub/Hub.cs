@@ -77,7 +77,8 @@ public static class Hub
     public static Task RejectAsync(HttpContext http, CancellationToken ct)
     {
         http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("DenpaHub")
-            .LogWarning("rate limited: {Path}", http.Request.Path.Value);
+            // パスそのもの (実況の局を含む) ではなく、ルートの形を書く
+            .LogWarning("rate limited: {Route}", (http.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText ?? "unknown");
         http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         http.Response.ContentType = "text/plain; charset=utf-8";
         return http.Response.WriteAsync("時間をおいてやり直してください。", ct);

@@ -163,27 +163,27 @@ sealed class JikkyoHarness : IAsyncDisposable
     public HttpClient Server => Hub.Server;
     int nextClient;
 
-    public static string PolicyJson(string? extra = null, bool relay = true) => $$"""
+    public static string PolicyJson() => """
         {
           "retentionDays": 30,
           "maxLength": 60,
           "postGapSeconds": 3,
-          "relayToNx": {{(relay ? "true" : "false")}},
+          "relayToNx": true,
           "maxAuthorsPerHome": 3,
           "channels": ["jk1", "jk9"],
           "ngWords": ["ねたばれ"],
           "blockedHomes": [],
           "blockedAuthors": [],
-          "removedComments": []{{extra}}
+          "removedComments": []
         }
         """;
 
-    public static async Task<JikkyoHarness> StartAsync(string? policy = null)
+    public static async Task<JikkyoHarness> StartAsync()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"denpa-hub-jikkyo-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         var policyPath = Path.Combine(directory, "policy.json");
-        await File.WriteAllTextAsync(policyPath, policy ?? PolicyJson());
+        await File.WriteAllTextAsync(policyPath, PolicyJson());
         var nx = await FakeNx.StartAsync();
         var hub = await Harness.StartAsync(
             new() { ["JIKKYO_DATA"] = Path.Combine(directory, "jikkyo.db"), ["JIKKYO_KEY"] = Key, ["JIKKYO_POLICY"] = policyPath },
