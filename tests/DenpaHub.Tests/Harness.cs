@@ -321,6 +321,8 @@ sealed class Harness : IAsyncDisposable
         Server.Dispose();
         ProviderBrowser.Dispose();
         Denpa.Dispose();
+        // ホストを止めてから捨てる (後ろで動いている掃除の処理を待つ)
+        await App.StopAsync();
         await App.DisposeAsync();
         await Provider.DisposeAsync();
     }

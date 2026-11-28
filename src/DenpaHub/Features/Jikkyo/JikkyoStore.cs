@@ -238,5 +238,9 @@ public sealed class JikkyoStore : IDisposable
         command.ExecuteNonQuery();
     }
 
-    public void Dispose() => db.Dispose();
+    /// <summary>ほかのスレッドのトランザクション (毎時の掃除など) が終わってから閉じる</summary>
+    public void Dispose()
+    {
+        lock (gate) db.Dispose();
+    }
 }
