@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using DenpaHub;
+using DenpaHub.Features.Jikkyo;
 using DenpaHub.Features.Niconico;
 using DenpaHub.Features.Ranking;
 using Microsoft.AspNetCore.Builder;
@@ -239,7 +240,7 @@ sealed class Harness : IAsyncDisposable
         return env;
     }
 
-    public static async Task<Harness> StartAsync(Dictionary<string, string?>? overrides = null)
+    public static async Task<Harness> StartAsync(Dictionary<string, string?>? overrides = null, JikkyoUpstream? jikkyo = null, Uri? nxOrigin = null, Uri? kakologOrigin = null)
     {
         var provider = await FakeProvider.StartAsync();
         var env = Env(overrides);
@@ -251,7 +252,10 @@ sealed class Harness : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.Logging.AddProvider(logs);
         var ranking = RankingSettings.Load(new DenpaHub.Env(name => env.GetValueOrDefault(name)));
-        var app = Hub.Build(builder, hubSettings, settings, provider.Handler, time, ranking);
+        var jikkyoSettings = JikkyoSettings.Load(new DenpaHub.Env(name => env.GetValueOrDefault(name)));
+        if (jikkyoSettings is not null)
+            jikkyoSettings = jikkyoSettings with { NxOrigin = nxOrigin ?? jikkyoSettings.NxOrigin, KakologOrigin = kakologOrigin ?? jikkyoSettings.KakologOrigin };
+        var app = Hub.Build(builder, hubSettings, settings, provider.Handler, time, ranking, jikkyoSettings, jikkyo);
         await app.StartAsync();
         var relay = app.GetTestServer().CreateClient();
         relay.BaseAddress = new Uri(RelayOrigin);
