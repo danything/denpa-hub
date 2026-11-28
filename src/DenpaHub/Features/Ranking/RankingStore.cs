@@ -404,7 +404,11 @@ public sealed class RankingStore : IDisposable
         lock (gate) return Convert.ToInt64(Scalar($"SELECT count(*) FROM {table}"));
     }
 
-    public void Dispose() => db.Dispose();
+    /// <summary>ほかのスレッドのトランザクション (毎時の掃除など) が終わってから閉じる</summary>
+    public void Dispose()
+    {
+        lock (gate) db.Dispose();
+    }
 
     static byte[] TokenHash(string token) => SHA256.HashData(Encoding.ASCII.GetBytes(token));
 
