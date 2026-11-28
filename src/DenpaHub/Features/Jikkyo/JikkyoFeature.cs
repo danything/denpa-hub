@@ -451,9 +451,17 @@ public sealed class JikkyoWorker(PolicyHolder policy, JikkyoStore store, LiveHub
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await Task.Yield();
-        var now = time.GetUtcNow();
-        foreach (var author in store.AuthorsSince((now - HubUsers.Span).ToUnixTimeMilliseconds())) users.Add(identity.NxUserId(author), now);
-        Apply(policy.Current);
+        try
+        {
+            var now = time.GetUtcNow();
+            foreach (var author in store.AuthorsSince((now - HubUsers.Span).ToUnixTimeMilliseconds())) users.Add(identity.NxUserId(author), now);
+            Apply(policy.Current);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // 止めない。戻ってきた写しを見分けられないのは直近に書いた人の分だけで、方針は次の読み直しで当てる
+            log.LogError("jikkyo worker start failed ({Type})", e.GetType().Name);
+        }
         var cleaned = DateTimeOffset.MinValue;
         while (!stoppingToken.IsCancellationRequested)
         {

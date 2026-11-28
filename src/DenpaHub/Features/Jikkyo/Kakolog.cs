@@ -106,13 +106,32 @@ public sealed class Kakolog(JikkyoSettings settings, HttpClient http, JikkyoStor
             foreach (var (start, source) in sources)
             {
                 // ほかのリクエストが同時に取りに行っていれば、そちらを待つ
-                var task = blocks.AddOrUpdate((channel, start), source.Task, (_, old) => Usable(old, now) ? old : source.Task);
+                var task = Claim((channel, start), source.Task, now);
                 tasks[start] = task;
                 if (task == source.Task) mine.Add(start);
             }
             run = [];
             if (mine.Count == 0) return;
             _ = FetchAsync(channel, first, last, now, sources);
+        }
+    }
+
+    /// <summary>
+    /// 塊の置き場を取る。取得中か期限の切れていない塊があればそれを返し、無ければ <paramref name="mine"/> を置いて返す。
+    /// 期限の切れた塊を置き換えたときは、その件数を数えから引く
+    /// </summary>
+    Task<Entry> Claim((string, long) key, Task<Entry> mine, long now)
+    {
+        while (true)
+        {
+            if (blocks.TryGetValue(key, out var old))
+            {
+                if (Usable(old, now)) return old;
+                if (!blocks.TryUpdate(key, mine, old)) continue;
+                if (old.IsCompletedSuccessfully) Interlocked.Add(ref cached, -(old.Result.Comments?.Count ?? 0));
+                return mine;
+            }
+            if (blocks.TryAdd(key, mine)) return mine;
         }
     }
 

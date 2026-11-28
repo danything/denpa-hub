@@ -246,6 +246,25 @@ public class JikkyoTests
     }
 
     [Test]
+    public async Task まだ入りきっていない塊を取り直しても_持っている件数は増え続けない()
+    {
+        await using var h = await JikkyoHarness.StartAsync();
+        var token = await h.IssueAsync();
+        var now = h.Hub.Time.Now;
+        h.Nx.Kakolog = _ => "[" + string.Join(",", Enumerable.Range(0, 5).Select(i => $$"""{"chat":{{FakeNx.Chat($"c{i}", now.AddSeconds(-i - 1))}}}""")) + "]";
+        var path = $"/jikkyo/channels/jk1/kakolog?from={now.AddMinutes(-5).ToUnixTimeMilliseconds()}&to={now.ToUnixTimeMilliseconds()}";
+        var kakolog = h.Hub.App.Services.GetRequiredService<Kakolog>();
+        using (var first = await h.GetAsync(token, path)) await Assert.That(first.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        var cached = kakolog.Cached;
+        await Assert.That(cached).IsEqualTo(5);
+        // 5 分たつと取り直す (期限の切れた塊を置き換える)
+        h.Hub.Time.Now += TimeSpan.FromMinutes(6);
+        using (var again = await h.GetAsync(token, path)) await Assert.That(again.StatusCode).IsEqualTo(HttpStatusCode.OK);
+        await Assert.That(h.Nx.KakologQueries.Count).IsEqualTo(2);
+        await Assert.That(kakolog.Cached).IsEqualTo(cached);
+    }
+
+    [Test]
     public async Task 過去ログ_API_が失敗したら独自コメントだけを返して_complete_を_false_にする()
     {
         await using var h = await JikkyoHarness.StartAsync();
