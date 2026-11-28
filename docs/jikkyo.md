@@ -132,7 +132,7 @@ Kubernetes では ConfigMap を `subPath` を使わずにファイルで載せ�
 
 | 欄                  | 効くもの                                                                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `retentionDays`     | 独自コメントを持つ日数 (1〜3650)。過ぎたものは 1 時間ごとの掃除で行ごと消します                                                            |
+| `retentionDays`     | 独自コメントを持つ日数 (1〜3650)。過ぎたものは 1 時間ごとの掃除で行ごと消します。Doa の hub は 30 日 ([rules.md](rules.md) に書いた値と同じにする)                                                            |
 | `maxLength`         | 本文の長さの上限 (書記素)                                                                                                                  |
 | `postGapSeconds`    | 同じ利用者が次に書けるまでの秒数。NX-Jikkyo の 0.5 秒の決まりより長くします                                                               |
 | `relayToNx`         | 独自コメントを NX-Jikkyo にも書くか                                                                                                        |
@@ -146,6 +146,9 @@ Kubernetes では ConfigMap を `subPath` を使わずにファイルで載せ�
 どの欄も要ります。無い・型が違うときは設定の誤りです。知らない欄は無視します。
 
 ### 削除依頼に応じるとき
+
+**削除の依頼と問い合わせは、メール (info@doany.io) と GitHub の Issue (danything/denpa-hub) で受けます。** 書く人に示す決まりと窓口は [rules.md](rules.md) にあり、
+denpa の書き込みの欄から 1 行でリンクしています。
 
 1. `denpa-hub comments <局> <から> <まで>` をコンテナの中で動かし (`kubectl exec -n denpa-hub deploy/denpa-hub -- /app/denpa-hub comments jk1 2026-11-28T21:00+09:00 2026-11-28T22:00+09:00`)、
    その区間の独自コメントを `id・時刻・家の ID・利用者の ID・NX-Jikkyo に書けたか・消したか・本文` のタブ区切りで読みます。サーバは立てません
@@ -165,7 +168,7 @@ SQLite のファイル 1 つ (`JIKKYO_DATA`)。番組ランキングと同じボ
 | `tokens`   | `hash` (トークンの SHA-256)・`created_at`・`used_at`                                                                       |
 | `comments` | `id`・`channel`・`at`・`text`・`mail`・`home` (家の ID)・`author` (保存する利用者の ID)・`relayed` (NX-Jikkyo に書けたか)・`removed` |
 
-- **接続元のアドレスは持ちません**。購読と過去ログのリクエスト (どの家がどの局をいつ観たか) も持たず、記録にも書きません
+- **接続元のアドレスは持ちません** (発信者情報の開示の請求に備えて残すこともしないと決めた)。購読と過去ログのリクエスト (どの家がどの局をいつ観たか) も持たず、記録にも書きません
 - `JIKKYO_KEY` (32 バイト) は、保存する利用者の ID と、NX-Jikkyo に渡す Cookie を作る鍵です。替えると全員の ID が替わります
 
 ## NX-Jikkyo から受ける
@@ -276,5 +279,6 @@ Pod のメモリの上限は 384Mi にし、`DOTNET_GCHeapHardLimit` をその 8
 | NX-Jikkyo     | hub の IP、hub がどの局をいつ受けているか (家の区別は無い)、書き込みと利用者ごとに固定の ID                                         |
 | 過去ログ API  | hub の IP と取った区間                                                                                                               |
 
+hub に届くのは、denpa の設定で「実況」をオンにした家のものだけです (番組ランキングと同じく、オンにすることが hub に送ることへの同意。denpa の docs/architecture.md)。
 hub が持つのは書き込みと家の ID・利用者の ID だけです (`retentionDays` の間)。購読と過去ログのリクエストは持たず、記録にも書きません。
 NX-Jikkyo の ID は利用者ごとに固定になるので、同じ利用者の書き込みは NX-Jikkyo の側で長く結び付きます。
