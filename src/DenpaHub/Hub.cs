@@ -1,3 +1,4 @@
+using DenpaHub.Features.Jikkyo;
 using DenpaHub.Features.Niconico;
 using DenpaHub.Features.Ranking;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -17,7 +18,9 @@ public static class Hub
         NiconicoSettings niconico,
         HttpMessageHandler? upstream = null,
         TimeProvider? time = null,
-        RankingSettings? ranking = null)
+        RankingSettings? ranking = null,
+        JikkyoSettings? jikkyo = null,
+        JikkyoUpstream? jikkyoUpstream = null)
     {
         // ASP.NET Core と HttpClient のログは URL (OAuth のコードや state を含む) を書くので、警告より下は出さない
         builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
@@ -47,6 +50,7 @@ public static class Hub
 
         NiconicoFeature.Add(builder.Services, niconico, upstream);
         RankingFeature.Add(builder.Services, ranking);
+        JikkyoFeature.Add(builder.Services, jikkyo, jikkyoUpstream);
 
         var app = builder.Build();
         if (hub.TrustedProxies.Count > 0) app.UseForwardedHeaders();
@@ -65,6 +69,7 @@ public static class Hub
         app.MapGet("/healthz", (RequestDelegate)(context => context.Response.WriteAsync("ok")));
         NiconicoFeature.Map(app);
         RankingFeature.Map(app);
+        JikkyoFeature.Map(app);
         return app;
     }
 
