@@ -1,0 +1,40 @@
+# denpa-hub の実況のコメントの中継の鍵 (docs/jikkyo.md の「設定」と「データの持ち方」)。キーは環境変数の名前そのまま。Deployment が envFrom で読む。
+#   JIKKYO_KEY … 保存する利用者の ID と、NX-Jikkyo に渡す Cookie を作る鍵 (32 バイトの base64。openssl rand -base64 32 で作った)。
+#                替えると全員の ID が替わる (方針の blockedAuthors が当たらなくなり、NX-Jikkyo での ID も替わる)
+# 値は SOPS で暗号化してある (../.sops.yaml)。直すときは danything/gitops の `tools/t sops edit <このファイル>` で開いて push する。
+# クラスタの中では sops-secrets-operator が Secret にし、Reloader の注釈で Deployment が入れ替わる。
+apiVersion: isindir.github.com/v1alpha3
+kind: SopsSecret
+metadata:
+    name: jikkyo
+    namespace: denpa-hub
+spec:
+    secretTemplates:
+        - name: denpa-hub-jikkyo
+          stringData:
+            JIKKYO_KEY: ENC[AES256_GCM,data:CnT5fFJ37x22YukJqp+4BtaDx9wo1hk8ZFEOSoq3F543AfguA7QmWrkHzIY=,iv:Zh9KZQGuoubReCieCFDRrwP+SCJpnWL1jU5YFNknDJg=,tag:DZbyjoUOj3kYzBW4Z7NQEQ==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSByNXQ1YzdZam1ZU2w5QXVt
+            WjAyZ0VjSTR5OTdBcUFhQ2h3b0I5UmtVRWw4Cm1KeHQxZzhKeU1iMGpWejdSc0FS
+            MUt2YVJCY2tieTQwTXJUaGkzb3BDQzQKLS0tIFRPTXdsMld4SE1GemswYS9lK1p6
+            M2NqTG1vUXRIS0wvaGlyOVVQRUNpVmcKHw6fjoi+yiTDc4LV8ShZM/wIkACSS8MZ
+            UqjOWvpVx3txyNRuRCPoeLdyqy/t5YOiocbBjS6cgcCt4iuV6vy5Gg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1sgnnkn67wpt4wgjsff4c36w3cmjkk557ng504e4aczx2lzls9y6ssy0x9r
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA5bUFWWVh1YUliZU51Q2ow
+            MDBlN080dWZwQVVvRkg3azQxY0Zhb0F1SHo4ClFlTnArejJQeWNzVFlDellObXlT
+            NlZ4cUtKRkpUZmttQ0kzbjk5KzRKYncKLS0tIEJpa3ZZb2FycjlxRnljS1NxbzZz
+            K3YvQ0wwNWZhdS84R1IrbklENjg4M2sKK/nikgfvTaCbF/vE93HTm51wAHYT+pW1
+            GQpKGQtfJJOMSg5Qcyd8q6U72k3tyBFC+Q9OA990QZTSruzxS0aiNw==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1z36xmmvjmwg4sus6k8nx6wgp8qyew7tj76077rvv5sagcgudd4tszrmwml
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-28T13:33:56Z"
+    mac: ENC[AES256_GCM,data:IFWfFf+/i3sEgpREhPO8JG0j11ClqhLsJ07Rivb4pRX4Vq/qFyRKDpi/PFkQjOTnmA+tSZglg2KjhU6PtKrUqDWFJQpKzBxJer7I7js/d+ZtNYa9TUVolvJhcjoeUuBqXWxXao/zyx15+uV+chw6Gqi88bWoUpk9yRcBi6LZWCI=,iv:Q4lDdNZ7VF7HqR9ei9hGyd+2+m60B/iSH0d4qTNcViA=,tag:9Y9KixKgEECbxYCApvCL/g==,type:str]
+    mac_only_encrypted: true
+    version: 3.13.3

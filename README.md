@@ -43,7 +43,7 @@ docker run --rm -p 8080:8080 \
   -e PUBLIC_ORIGIN=https://hub.example.jp \
   -e NICONICO_CLIENT_SECRET_FILE=/run/secrets/niconico-client-secret \
   ... \
-  ghcr.io/danything/denpa-hub:v0.6.0
+  ghcr.io/danything/denpa-hub:v0.7.0
 ```
 
 イメージは Native AOT の実行ファイル 1 個を distroless (`gcr.io/distroless/cc-debian13:nonroot`) に置いたもので、シェルもパッケージ管理も無く、root でも動きません。
@@ -58,10 +58,12 @@ main の `deploy/*.yaml` をそのまま同期します (Helm は使わない)�
 | --------------------- | ------------------------------------------------------------------------------------------------- |
 | `argocd.yaml`         | ApplicationSet が読む、この置き場の設定 (namespace `denpa-hub`)                                   |
 | `namespace.yaml`      | PSA を restricted にするラベル                                                                    |
-| `deployment.yaml`     | Deployment・Service・ランキングのデータの PVC。`PUBLIC_ORIGIN`・`TRUSTED_PROXIES`・`RANKING_DATA` とイメージ (タグと digest) はここ |
+| `deployment.yaml`     | Deployment・Service・ランキングと実況のデータの PVC。`PUBLIC_ORIGIN`・`TRUSTED_PROXIES`・`RANKING_DATA`・`JIKKYO_DATA`・`JIKKYO_POLICY` とイメージ (タグと digest) はここ |
 | `secrets.sops.yaml`   | SopsSecret。SOPS で暗号化した値から、sops-secrets-operator が Secret `denpa-hub` を作る |
 | `live.sops.yaml`      | SopsSecret。実況の番組と視聴の接続先を引く設定の Secret `denpa-hub-live`                    |
-| `httproute.yaml`      | Gateway `kube-system/doany` の `https` のリスナーに `dh.doany.io` を載せる (Cloudflare を通す)    |
+| `jikkyo.sops.yaml`    | SopsSecret。実況のコメントの中継の鍵 `JIKKYO_KEY` の Secret `denpa-hub-jikkyo`               |
+| `jikkyo-policy.yaml`  | 実況のコメントの中継の運営の方針 (`JIKKYO_POLICY` の JSON) の ConfigMap                       |
+| `httproute.yaml`      | Gateway `kube-system/doany` の `https` のリスナーに `dh.doany.io` を載せる (Cloudflare を通す)。`/jikkyo/` だけは応答の時間の上限を外す |
 | `network-policy.yaml` | 届く相手を Gateway とノードに絞る CiliumNetworkPolicy                                             |
 
 `secrets.sops.yaml` には、[docs/niconico.md](docs/niconico.md#設定) の `NICONICO_*` を同じ名前で入れます
@@ -72,15 +74,14 @@ main の `deploy/*.yaml` をそのまま同期します (Helm は使わない)�
 `deployment.yaml` は `RANKING_DATA` を渡すので、鍵を消すとランキングの入ったイメージは起動しません。
 ghcr.io のパッケージは公開なので、引くための資格情報は要りません。
 
-#### 実況のコメントの中継を入れるとき
+実況のコメントの中継 ([docs/jikkyo.md](docs/jikkyo.md)) は v0.7.0 から入っています。
 
-`deploy/` にはまだ入れていません。入れるときは次のものを足します ([docs/jikkyo.md](docs/jikkyo.md))。
-
-- `secrets.sops.yaml` に `JIKKYO_KEY`、`deployment.yaml` に `JIKKYO_DATA` (ランキングと同じ PVC の別のファイル) と `JIKKYO_POLICY`
-- 方針の JSON の ConfigMap。`subPath` を使わずにディレクトリで載せる (`subPath` だと書き換えが届かない)
-- メモリの上限を 384Mi にし、`DOTNET_GCHeapHardLimit` をその 8 割に置く (過去ログのキャッシュと局ごとの控えのぶん)
-- Gateway と Cloudflare で、SSE (`/jikkyo/channels/*/live`) が応答の時間の上限で切られないかを確かめる (15 秒ごとに ping を送る)
-- denpa より先に出す。hub が `/jikkyo/*` を持たない間、新しい denpa はコメントを流せない
+- 鍵 `JIKKYO_KEY` は `jikkyo.sops.yaml` にあります。`deployment.yaml` は `JIKKYO_DATA` (ランキングと同じ PVC の `/data/jikkyo.db`) を渡すので、鍵を消すと起動しません
+- 運営の方針は `jikkyo-policy.yaml` の ConfigMap を `/config` にディレクトリで載せます (`subPath` だと書き換えが届かない)。
+  書き換えて main に入れると、kubelet がファイルを載せ替えたあと (1 分ほど)、hub が 30 秒以内に読み直します (Pod は入れ替えない)
+- メモリの上限は 384Mi、`DOTNET_GCHeapHardLimit` はその 8 割です (過去ログのキャッシュと局ごとの控えのぶん)
+- `httproute.yaml` は `/jikkyo/` だけ Gateway の既定の 15 秒の上限を外します。SSE (`/jikkyo/channels/*/live`) は 15 秒ごとに ping を送るので、Cloudflare の 100 秒の無通信の切断にも掛かりません
+- denpa より先に出します。hub が `/jikkyo/*` を持たない間、新しい denpa はコメントを流せません
 
 #### 新しいバージョンを出すとき
 

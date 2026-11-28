@@ -1,11 +1,13 @@
-# denpa-hub 本体。番組ランキングのデータ (SQLite のファイル 1 つ) を PVC に置くので、1 台だけで動かし、
-# 入れ替えは Recreate にする (同じファイルを 2 つのプロセスで開かないように。docs/ranking.md の「データの持ち方」)。
-# データのバックアップは取らない (票はどれも数が決まれば消すもので、失っても denpa が送り直せば戻る。外部に示す集計は、示すときに denpa-hub tallies で読み出して手元に残す)。
+# denpa-hub 本体。番組ランキングと実況のデータ (SQLite のファイルを 1 つずつ) を同じ PVC に置くので、1 台だけで動かし、
+# 入れ替えは Recreate にする (同じファイルを 2 つのプロセスで開かないように。docs/ranking.md と docs/jikkyo.md の「データの持ち方」)。
+# データのバックアップは取らない (票はどれも数が決まれば消すもので、失っても denpa が送り直せば戻る。外部に示す集計は、示すときに denpa-hub tallies で読み出して手元に残す。
+# 実況の独自コメントは保存期間を過ぎれば消すもので、失えば録画の過去ログから抜けるだけ)。
 #
 # 設定のうちリポジトリに書いてよいものはここに、書かないもの (シークレットとニコニコ固有の値) は
-# SOPS で暗号化した secrets.sops.yaml・live.sops.yaml から sops-secrets-operator が作る Secret denpa-hub・denpa-hub-live にあり、envFrom で全部読む。
+# SOPS で暗号化した secrets.sops.yaml・live.sops.yaml・jikkyo.sops.yaml から sops-secrets-operator が作る Secret denpa-hub・denpa-hub-live・denpa-hub-jikkyo にあり、envFrom で全部読む。
 # ランキングの印の鍵 RANKING_MARK_KEY も Secret denpa-hub にある。**ランキングの入ったイメージは、RANKING_DATA があるのに鍵が無いと起動しない。**
-# 値を書き換えると、Reloader の注釈で Pod が入れ替わる。
+# 実況も同じく、JIKKYO_DATA があるのに JIKKYO_KEY (Secret denpa-hub-jikkyo) か方針のファイルが無いと起動しない。
+# Secret の値を書き換えると、Reloader の注釈で Pod が入れ替わる。実況の運営の方針 (jikkyo-policy.yaml の ConfigMap) は入れ替えずに hub が読み直す。
 #
 # イメージは v* のタグを push すると CI が ghcr.io に出す。入れ替えるときはタグと digest を両方書き換える。
 # ghcr.io のパッケージは公開 (danything の既定) なので imagePullSecrets は要らない
@@ -69,7 +71,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: denpa-hub
-          image: ghcr.io/danything/denpa-hub:v0.6.0@sha256:f7a562f5428fe2836fcbdd9f209a7ff8275afb8f0d45e097915f1da85066ff16
+          image: ghcr.io/danything/denpa-hub:v0.7.0@sha256:9668acc253ff67f6ebe9ef94aefe72aed05baa060414948ec22910e962692523
           ports:
             - containerPort: 8080
           env:
@@ -98,11 +100,23 @@ spec:
             # 番組ランキングのデータ。鍵 (RANKING_MARK_KEY) は Secret denpa-hub から読む
             - name: RANKING_DATA
               value: /data/ranking.db
+            # 実況のコメントの中継のデータ。ランキングと同じ PVC の別のファイル。鍵 (JIKKYO_KEY) は Secret denpa-hub-jikkyo から読む
+            - name: JIKKYO_DATA
+              value: /data/jikkyo.db
+            # 運営の方針 (jikkyo-policy.yaml の ConfigMap をディレクトリで載せたもの)
+            - name: JIKKYO_POLICY
+              value: /config/jikkyo-policy.json
+            # GC のヒープの上限。メモリの上限 (384Mi) の 8 割 (16 進で書く。0x13333333 = 322122547 バイト)。
+            # 過去ログのキャッシュと局ごとの控えのぶん (docs/jikkyo.md の「メモリ」)
+            - name: DOTNET_GCHeapHardLimit
+              value: "0x13333333"
           envFrom:
             - secretRef:
                 name: denpa-hub
             - secretRef:
                 name: denpa-hub-live
+            - secretRef:
+                name: denpa-hub-jikkyo
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -112,6 +126,10 @@ spec:
             # 書けるのはここだけ (ルートは読み取り専用のまま)
             - name: data
               mountPath: /data
+            # subPath を使わずにディレクトリで載せる (subPath だと ConfigMap の書き換えが届かない)
+            - name: jikkyo-policy
+              mountPath: /config
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /healthz
@@ -125,10 +143,14 @@ spec:
           resources:
             requests:
               cpu: 5m
-              memory: 32Mi
+              memory: 64Mi
             limits:
-              memory: 128Mi
+              # 実況の過去ログのキャッシュと局ごとの控えのぶん (docs/jikkyo.md の「メモリ」)
+              memory: 384Mi
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: denpa-hub-data
+        - name: jikkyo-policy
+          configMap:
+            name: denpa-hub-jikkyo-policy

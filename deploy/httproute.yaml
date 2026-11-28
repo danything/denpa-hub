@@ -1,7 +1,9 @@
 # 公開の経路。証明書は Gateway (danything/gitops の deploy/gateway/) の `*.doany.io` のワイルドカードなので指定しない。
 # dh.doany.io は 1 段の名前なので `https` のリスナーに載る。http から https へのリダイレクトも Gateway 側にある。
 # **Cloudflare を通す** (gitops の基本。注釈を付けなければ ExternalDNS が proxied のレコードを作る)。
-# 映像のような大きな応答は無く、レート制限に使う本当の接続元は X-Forwarded-For から読む (deployment.yaml の TRUSTED_PROXIES)
+# 映像のような大きな応答は無く、レート制限に使う本当の接続元は X-Forwarded-For から読む (deployment.yaml の TRUSTED_PROXIES)。
+# 実況 (/jikkyo/) だけは Gateway の既定の 15 秒の上限を外す。購読の SSE はつなぎ続け (15 秒ごとに ping を送るので、Cloudflare の 100 秒の無通信の切断にも掛からない)、
+# 過去ログは hub が 20 秒まで待つ (docs/jikkyo.md)。ほかのエンドポイントは既定の 15 秒のまま
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -15,6 +17,15 @@ spec:
   hostnames:
     - dh.doany.io
   rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /jikkyo/
+      backendRefs:
+        - name: denpa-hub
+          port: 8080
+      timeouts:
+        request: 0s
     - matches:
         - path:
             type: PathPrefix
