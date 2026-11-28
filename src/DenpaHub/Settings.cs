@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 
 namespace DenpaHub;
 
@@ -67,6 +68,19 @@ public sealed class Env(Func<string, string?> source)
 /// <param name="TrustedProxies">X-Forwarded-For を信じる手前のプロキシ</param>
 public sealed record HubSettings(string PublicOrigin, IReadOnlyList<IPNetwork> TrustedProxies)
 {
+    /// <summary>上流 (ニコニコ・NX-Jikkyo・過去ログ API) への全リクエストに付ける User-Agent の既定。どのソフトからのアクセスかが分かる、公開してよい値</summary>
+    public static string DefaultUserAgent
+    {
+        get
+        {
+            var version = typeof(HubSettings).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
+            // ビルドが足すコミットの印 (+<sha>) は外す
+            var plus = version.IndexOf('+');
+            return $"denpa-hub/{(plus < 0 ? version : version[..plus])} (+https://github.com/danything/denpa-hub)";
+        }
+    }
+
     public static HubSettings Load(Env env)
     {
         var origin = env.RequireUrl("PUBLIC_ORIGIN");

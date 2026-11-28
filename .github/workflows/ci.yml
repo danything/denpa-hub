@@ -100,3 +100,34 @@ jobs:
           # 外部に示す集計の読み出し (同じ実行ファイルを引数付きで、動いているコンテナの中で動かす)
           docker exec smoke /app/denpa-hub tallies --from 2026-11-01 | grep -qF '"tallies": []'
           docker rm -f smoke
+      # 実況のコメントの中継を入れて動かし、方針のファイルを読み、独自コメントを SQLite に書けることを見る。
+      # NX-Jikkyo と過去ログ API には繋がない (購読と過去ログは呼ばず、中継は方針で切る)
+      - name: Smoke (jikkyo)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          set -eu
+          key=$(openssl rand -base64 32)
+          mkdir -p "$RUNNER_TEMP/jikkyo"
+          cat > "$RUNNER_TEMP/jikkyo/policy.json" <<'JSON'
+          {"retentionDays":30,"maxLength":60,"postGapSeconds":3,"relayToNx":false,"maxAuthorsPerHome":8,
+           "channels":["jk1"],"ngWords":[],"blockedHomes":[],"blockedAuthors":[],"removedComments":[]}
+          JSON
+          docker run -d --name smoke-jikkyo -p 8080:8080 --read-only --tmpfs /data:uid=65532,gid=65532 \
+            -v "$RUNNER_TEMP/jikkyo:/config:ro" \
+            -e PUBLIC_ORIGIN=https://hub.example.jp \
+            -e NICONICO_STATE_KEY="$key" -e NICONICO_CLIENT_ID=smoke -e NICONICO_CLIENT_SECRET=smoke \
+            -e NICONICO_AUTHORIZE_URL=https://provider.example/authorize -e NICONICO_TOKEN_URL=https://provider.example/token \
+            -e NICONICO_LIVE_CHANNELS=jk1=ch1 \
+            -e 'NICONICO_LIVE_PROGRAM_URL=https://provider.example/program?ch={channel}' -e NICONICO_LIVE_PROGRAM_FIELD=/program \
+            -e 'NICONICO_LIVE_WATCH_URL=https://provider.example/watch?program={program}&user={user}' \
+            -e JIKKYO_DATA=/data/jikkyo.db -e JIKKYO_KEY="$key" -e JIKKYO_POLICY=/config/policy.json \
+            "ghcr.io/${{ github.repository }}:ci"
+          for _ in $(seq 30); do curl -fsS http://localhost:8080/healthz >/dev/null 2>&1 && break; sleep 1; done
+          docker logs smoke-jikkyo 2>&1 | grep -q "jikkyo: on"
+          token=$(curl -fsS -X POST http://localhost:8080/jikkyo/tokens | sed -E 's/.*"token":"([^"]+)".*/\1/')
+          curl -fsS -X POST http://localhost:8080/jikkyo/channels/jk1/comments -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+            -d '{"author":"AAAAAAAAAAAAAAAAAAAAAA","text":"スモーク","color":"red"}' | grep -q '"id":'
+          # 削除依頼を調べるときの読み出し (同じ実行ファイルを引数付きで、動いているコンテナの中で動かす)
+          docker exec smoke-jikkyo /app/denpa-hub comments jk1 "$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)" "$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)" \
+            | grep -qF 'スモーク'
+          docker rm -f smoke-jikkyo

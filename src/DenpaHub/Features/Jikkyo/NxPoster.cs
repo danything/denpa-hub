@@ -67,8 +67,6 @@ public sealed class NxPoster(JikkyoSettings settings, NxConnect connect, Identit
                 session.Dispose();
     }
 
-    public int Count => sessions.Count;
-
     public void Dispose()
     {
         foreach (var session in sessions.Values) session.Dispose();

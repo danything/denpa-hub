@@ -93,26 +93,24 @@ public sealed class Kakolog(JikkyoSettings settings, HttpClient http, JikkyoStor
         void Flush()
         {
             if (run.Count == 0) return;
-            var first = run[0];
-            var last = run[^1] + Block;
             if (Volatile.Read(ref queued) >= MaxQueued)
             {
                 foreach (var start in run) tasks[start] = Task.FromResult(new Entry(null, 0));
                 run = [];
                 return;
             }
-            var sources = run.ToDictionary(s => s, _ => new TaskCompletionSource<Entry>(TaskCreationOptions.RunContinuationsAsynchronously));
-            var mine = new List<long>();
-            foreach (var (start, source) in sources)
+            // 取得して数えに足すのは、置き場を取れた塊だけ。ほかのリクエストが同時に取りに行っている塊は、そちらを待つ
+            var mine = new Dictionary<long, TaskCompletionSource<Entry>>();
+            foreach (var start in run)
             {
-                // ほかのリクエストが同時に取りに行っていれば、そちらを待つ
+                var source = new TaskCompletionSource<Entry>(TaskCreationOptions.RunContinuationsAsynchronously);
                 var task = Claim((channel, start), source.Task, now);
                 tasks[start] = task;
-                if (task == source.Task) mine.Add(start);
+                if (task == source.Task) mine[start] = source;
             }
             run = [];
             if (mine.Count == 0) return;
-            _ = FetchAsync(channel, first, last, now, sources);
+            _ = FetchAsync(channel, mine.Keys.Min(), mine.Keys.Max() + Block, now, mine);
         }
     }
 
