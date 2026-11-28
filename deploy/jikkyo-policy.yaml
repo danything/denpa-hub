@@ -1,0 +1,29 @@
+# 実況のコメントの中継の運営の方針 (JIKKYO_POLICY)。欄の意味は docs/jikkyo.md の「運営の方針」、書く人に示す決まりは docs/rules.md。
+# deployment.yaml が /config にディレクトリで載せる (subPath を使わない。subPath だと書き換えが届かない)。
+# hub は 30 秒ごとにファイルの更新の時刻を見て読み直すので、Pod を入れ替えない (Reloader には見させない)。
+# 読み直したときに形が違えば、前の方針を使い続けて警告を 1 回出す (jikkyo policy not reloaded)。
+#
+# - retentionDays は docs/rules.md に書いた日数 (30 日) と同じにする
+# - 削除依頼に応じるときは、denpa-hub comments で読んだ id を removedComments に、止める人を blockedAuthors か blockedHomes に足す
+#   (docs/jikkyo.md の「削除依頼に応じるとき」)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: denpa-hub-jikkyo-policy
+  namespace: denpa-hub
+  annotations:
+    reloader.stakater.com/ignore: "true"
+data:
+  jikkyo-policy.json: |
+    {
+      "retentionDays": 30,
+      "maxLength": 60,
+      "postGapSeconds": 3,
+      "relayToNx": true,
+      "maxAuthorsPerHome": 8,
+      "channels": ["jk1", "jk2", "jk4", "jk5", "jk6", "jk7", "jk8", "jk9"],
+      "ngWords": [],
+      "blockedHomes": [],
+      "blockedAuthors": [],
+      "removedComments": []
+    }
